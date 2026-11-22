@@ -159,17 +159,15 @@ impl From<OutputFormat> for UsbSignal {
 
 impl UsbSignal {
     fn path<'a>(&'a self, device: &'a str) -> chrome::SignalPath<'a> {
-        use chrome::SignalQuality::{Lossy, Preserved};
-        let (decoder, source_quality, note) = match self.codec {
-            SourceCodec::Flac => ("Symphonia · FLAC", Preserved,
-                "Bit-perfect to ALSA · No resampling, channel remix or DSP"),
-            SourceCodec::Mp3 => ("Symphonia · MP3", Lossy,
-                "Lossy MP3 source · No resampling or channel remix"),
+        use chrome::SignalQuality::Preserved;
+        let (decoder, note) = match self.codec {
+            SourceCodec::Flac => ("Symphonia · FLAC", "Bit-perfect to ALSA · No resampling, channel remix or DSP"),
+            SourceCodec::Mp3 => ("Symphonia · MP3", "Bit-perfect PCM to ALSA · After decoding"),
         };
         let device = device.strip_prefix("hw:CARD=").and_then(|value| value.split_once(",DEV="))
             .map_or(device, |(name, _)| name);
         chrome::SignalPath {
-            stages: [("jastreamer", &self.source, source_quality), ("Decoding", decoder, source_quality),
+            stages: [("jastreamer", &self.source, Preserved), ("Decoding", decoder, Preserved),
                 ("PCM", &self.pcm, Preserved), (device, "ALSA hw · USB DAC", Preserved)],
             note, flowing: true,
         }

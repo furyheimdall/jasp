@@ -177,7 +177,7 @@ pub(crate) fn tr<'a>(ui: &Ui, text: &'a str) -> Cow<'a, str> {
         "Rate and channels match · Bit-perfect not verified" => "샘플레이트·채널 일치 · 비트 퍼펙트 미확인",
         "Bit-perfect not verified" => "비트 퍼펙트 미확인",
         "Bit-perfect to ALSA · No resampling, channel remix or DSP" => "ALSA까지 비트 퍼펙트 · 리샘플링·채널 변환·DSP 없음",
-        "Lossy MP3 source · No resampling or channel remix" => "손실 MP3 원본 · 리샘플링·채널 변환 없음",
+        "Bit-perfect PCM to ALSA · After decoding" => "디코딩 후 ALSA까지 비트 퍼펙트 PCM",
         "Bit-perfect to USB · Based on configuration" => "USB까지 비트 퍼펙트 · 설정 기준",
         "Lossless at this stage" => "이 단계의 무손실 확인", "Lossy source" => "손실 압축 원본",
         "PCM format changed" => "PCM 형식 변환 확인", "PCM bit depth decreased" => "PCM 비트 깊이가 감소했어요.",
