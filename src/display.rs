@@ -327,6 +327,7 @@ fn mode_button(ui: &mut Ui, mode: Mode, selected: bool) -> egui::Response {
     let text = egui::RichText::new(tr(ui, mode.label())).size(17.0).strong()
         .color(egui::Color32::WHITE.lerp_to_gamma(accent, phase));
     let control = egui::Button::selectable(selected, text).min_size(egui::vec2(104.0, 54.0))
+        .frame_when_inactive(true)
         .corner_radius(10)
         .fill(theme::raised(ui).lerp_to_gamma(accent, phase * 0.16))
         .stroke(egui::Stroke::new(1.0 + 0.5 * phase, theme::line(ui).lerp_to_gamma(accent, phase)));
@@ -353,12 +354,14 @@ fn touch_slider(ui: &mut Ui, label: &str, value: &mut u8, max: u8, unit: &str) -
             let response = ui.scope(|ui| {
                 let spacing = ui.spacing_mut();
                 spacing.interact_size.y = 54.0;
+                spacing.slider_rail_height = 10.0;
                 spacing.slider_width = (width - 2.0 * (step.x + spacing.item_spacing.x)).max(1.0);
                 let visuals = ui.visuals_mut();
                 visuals.widgets.inactive.fg_stroke.color = accent;
                 visuals.widgets.hovered.fg_stroke.color = accent;
                 visuals.widgets.active.fg_stroke.color = accent;
                 ui.add(egui::Slider::new(value, 1..=max).show_value(false)
+                    .handle_shape(egui::style::HandleShape::Circle)
                     .trailing_fill(true).smart_aim(false).step_by(1.0)).labelled_by(caption)
             }).inner;
             if step_button(ui, "+").clicked() { *value = value.saturating_add(1).min(max); }
