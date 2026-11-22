@@ -611,11 +611,10 @@ fn artwork(ui: &Ui, rect: Rect, cover: Option<&TextureHandle>, folder: bool) {
 }
 
 fn paint_cover(painter: &egui::Painter, rect: Rect, cover: &TextureHandle, tint: Color32) {
-    let ratio = cover.size_vec2();
-    let crop = ratio * (1.0 / ratio.max_elem());
-    let inset = (vec2(1.0, 1.0) - vec2(crop.y, crop.x)) * 0.5;
-    let uv = Rect::from_min_max(pos2(inset.x, inset.y), pos2(1.0 - inset.x, 1.0 - inset.y));
-    painter.image(cover.id(), rect, uv, tint);
+    let source = cover.size_vec2();
+    let scale = (rect.width() / source.x).min(rect.height() / source.y);
+    let image = Rect::from_center_size(rect.center(), source * scale);
+    painter.image(cover.id(), image, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), tint);
 }
 
 fn album_tile(ui: &mut Ui, size: [f32; 2], title: &str, meta: &str, cover: Option<&TextureHandle>, side: f32) -> bool {

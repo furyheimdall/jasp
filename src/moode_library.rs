@@ -449,10 +449,13 @@ fn library_error(ui: &mut Ui, error: &mut Option<String>) -> bool {
 fn album_grid(ui: &mut Ui, albums: &[Album], art: &mut Artwork) -> Option<usize> {
     let width = (ui.available_width() - 12.0).max(1.0);
     let gap = ui.spacing().item_spacing.x;
-    let columns = ((width + gap) / (164.0 + gap)).floor().max(1.0) as usize;
+    let columns = ((width + gap) / (158.0 + gap)).floor().clamp(1.0, 6.0) as usize;
     let cell = ((width - gap * (columns - 1) as f32) / columns as f32).max(1.0);
-    let side = (cell - 14.0).max(1.0);
-    let height = side + 58.0;
+    let chrome_height = 58.0;
+    let art_limit = ((ui.available_height() - ui.spacing().item_spacing.y) / 2.0 - chrome_height)
+        .clamp(112.0, 144.0);
+    let side = (cell - 14.0).clamp(1.0, art_limit);
+    let height = side + chrome_height;
     let mut selected = None;
     let unknown_artist = tr(ui, "Unknown artist");
     ui.label(RichText::new(format!("{} {}", albums.len(), tr(ui, "albums"))).size(13.0).color(MUTED));
@@ -469,7 +472,8 @@ fn album_grid(ui: &mut Ui, albums: &[Album], art: &mut Artwork) -> Option<usize>
                             chrome::focus_fill(ui, &response, theme::card(ui), theme::companion(ui).gamma_multiply(0.13));
                             ui.painter().rect_stroke(rect, 9, Stroke::new(1.0, theme::raised(ui)), egui::StrokeKind::Inside);
                             let cover = art.get(ui, &album.cover_file);
-                            let image = Rect::from_min_size(rect.left_top() + vec2(7.0, 7.0), vec2(side, side));
+                            let image = Rect::from_center_size(
+                                pos2(rect.center().x, rect.top() + 7.0 + side / 2.0), vec2(side, side));
                             paint_art(ui, image, cover);
                             if cover.is_some() { chrome::cover_halo(ui, image, theme::companion(ui), response.hovered()); }
                             line(ui, rect.left_top() + vec2(8.0, side + 11.0), cell - 16.0, &album.title, 16.0, Color32::WHITE);

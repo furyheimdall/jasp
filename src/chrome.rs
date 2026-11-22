@@ -80,7 +80,7 @@ impl Entrance {
         let remaining = (1.0 - phase).powi(3);
         if phase < 1.0 { ui.ctx().request_repaint(); }
         let bounds = ui.available_rect_before_wrap();
-        let shift = vec2(direction * 29.0 * remaining, 4.0 * remaining);
+        let shift = vec2(direction * 29.0 * remaining, 0.0);
         ui.scope_builder(egui::UiBuilder::new().max_rect(bounds.translate(shift)), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(bounds));
             ui.multiply_opacity(1.0 - 0.60 * remaining);
