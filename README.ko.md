@@ -2,9 +2,10 @@
 
 [English](README.md) · **한국어**
 
-Jasp는 Rust로 개발한 Raspberry Pi용 네이티브 터치스크린 음악 플레이어입니다. 데스크톱 앱이나 전체 화면 키오스크로 실행할 수 있습니다.
+Jasp는 Rust로 개발한 **Raspberry Pi용 네이티브 jastreamer 음악 플레이어**입니다. 기존 [jastreamer Server](https://github.com/furyheimdall/jastreamer)에 연결해 라이브러리를 탐색하고 대기열을 관리하며, Pi에 연결된 USB DAC으로 음악을 재생합니다.
 
-- **jastreamer:** 기존 [jastreamer Server](https://github.com/furyheimdall/jastreamer)에 연결해 라이브러리를 탐색하고 대기열을 관리하며 음악을 재생합니다.
+Raspberry Pi 데스크톱 앱이나 전체 화면 터치스크린 키오스크로 실행할 수 있습니다. Jasp는 재생기이며 jastreamer Server를 대신하지 않습니다.
+
 - **moOde UI 프런트엔드(선택):** Pi의 로컬 화면에서 [moOde](https://moodeaudio.org/) 웹 플레이어 대신 사용할 수 있습니다. 기존 moOde 백엔드, MPD, 라이브러리는 그대로 사용합니다.
 
 ## 주요 기능

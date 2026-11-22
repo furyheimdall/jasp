@@ -2,9 +2,10 @@
 
 **English** · [한국어](README.ko.md)
 
-Jasp is a native touchscreen music player for Raspberry Pi, written in Rust. It runs as a desktop app or a fullscreen kiosk.
+Jasp is a native **jastreamer music player for Raspberry Pi**, written in Rust. It connects to an existing [jastreamer Server](https://github.com/furyheimdall/jastreamer) to browse its library, manage its queue, and play music through a USB DAC connected to the Pi.
 
-- **jastreamer:** Connects to an existing [jastreamer Server](https://github.com/furyheimdall/jastreamer) for library browsing, queue management, and playback.
+Use Jasp on the Raspberry Pi desktop or run it as a fullscreen touchscreen kiosk. Jasp is the player; it does not replace jastreamer Server.
+
 - **moOde UI frontend (optional):** Replaces the [moOde](https://moodeaudio.org/) web player on the Pi’s local display. Jasp uses the existing moOde backend, MPD, and library; it does not replace them.
 
 ## Features
