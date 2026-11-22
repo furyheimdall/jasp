@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+if [ "$(id -u)" -eq 0 ]; then
+    echo 'Run jasp as the user who will use it, not as root.' >&2
+    exit 1
+fi
+
+case $(tty 2>/dev/null || :) in
+    /dev/tty[1-9]|/dev/tty[1-5][0-9]|/dev/tty6[0-3]) ;;
+    *)
+        echo 'To open Jasp, log in on the console attached to the Pi and run: jasp' >&2
+        echo 'To configure automatic startup over SSH instead, run: jasp autostart enable' >&2
+        exit 1 ;;
+esac
+
+if [ ! -x /usr/bin/cage ] || [ ! -x /usr/bin/sudo ] || [ ! -r /etc/pam.d/jasp-kiosk ]; then
+    echo 'Install the Lite startup requirements: sudo apt install cage libpam-systemd sudo' >&2
+    exit 1
+fi
+/usr/libexec/jasp/kiosk-console-available || exit 1
+
+runtime=${XDG_RUNTIME_DIR:-}
+if [ -z "$runtime" ] || [ ! -d "$runtime" ] || [ ! -O "$runtime" ]; then
+    echo 'Jasp needs an active console login with a user runtime directory. Log in directly on the Pi.' >&2
+    exit 1
+fi
+
+request_dir=$(mktemp -d -- "$runtime/jasp-first-run.XXXXXXXX")
+request=$request_dir/enable
+trap 'rm -f -- "$request"; rmdir -- "$request_dir"' EXIT
+export JASP_LITE_KIOSK=1
+
+# Wait for Cage to give the console back. The UI can request one fixed action,
+# but authentication and the privileged operation happen in the login terminal.
+status=0
+/usr/bin/env JASP_KIOSK_PREVIEW_REQUEST="$request" /usr/bin/cage -s -- /usr/bin/jasp "$@" || status=$?
+if [ ! -f "$request" ]; then exit "$status"; fi
+printf '\nEnabling Jasp on the next boot. Approve sudo if prompted.\n'
+/usr/bin/jasp autostart enable
+printf 'Jasp will start automatically on the next boot. Reopening it now.\n\n'
+/usr/bin/cage -s -- /usr/bin/jasp "$@"

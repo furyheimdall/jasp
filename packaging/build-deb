@@ -1,0 +1,54 @@
+#!/bin/sh
+set -eu
+
+cd "$(dirname "$0")/.."
+if [ "$(dpkg --print-architecture)" != arm64 ] || ! grep -qx 'VERSION_CODENAME=trixie' /etc/os-release; then
+    echo 'Build this package on 64-bit Raspberry Pi OS or Debian 13 (Trixie).' >&2
+    exit 1
+fi
+
+# Rust panic locations otherwise embed the absolute build and Cargo registry paths.
+cargo_home=${CARGO_HOME:-"$HOME/.cargo"}
+separator=$(printf '\037')
+CARGO_ENCODED_RUSTFLAGS="${CARGO_ENCODED_RUSTFLAGS:+$CARGO_ENCODED_RUSTFLAGS$separator}--remap-path-prefix=$HOME=/build$separator--remap-path-prefix=$cargo_home=/cargo$separator--remap-path-prefix=$PWD=/src/jasp"
+export CARGO_ENCODED_RUSTFLAGS
+
+cargo build --locked --release --target-dir target
+binary=target/release/jasp
+version=$($binary --version)
+version=${version#jasp }
+dpkg --validate-version "$version"
+
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
+chmod 0755 "$stage"
+install -Dm755 "$binary" "$stage/usr/bin/jasp"
+strip --strip-unneeded "$stage/usr/bin/jasp"
+install -Dm644 packaging/jasp.desktop "$stage/usr/share/applications/jasp.desktop"
+install -Dm644 packaging/jasp-kiosk@.service "$stage/usr/lib/systemd/system/jasp-kiosk@.service"
+install -Dm644 packaging/jasp-kiosk.pam "$stage/etc/pam.d/jasp-kiosk"
+install -Dm755 packaging/kiosk-console-available "$stage/usr/libexec/jasp/kiosk-console-available"
+install -Dm755 packaging/jasp-console "$stage/usr/libexec/jasp/jasp-console"
+install -Dm644 LICENSE "$stage/usr/share/doc/jasp/copyright"
+cargo metadata --locked --format-version 1 --filter-platform aarch64-unknown-linux-gnu > "$stage/cargo-metadata.json"
+python3 packaging/rust-licenses.py < "$stage/cargo-metadata.json" > "$stage/usr/share/doc/jasp/dependency-licenses"
+rm -- "$stage/cargo-metadata.json"
+
+mkdir -p "$stage/DEBIAN" target/packages
+install -m755 packaging/postinst "$stage/DEBIAN/postinst"
+printf '%s\n' /etc/pam.d/jasp-kiosk > "$stage/DEBIAN/conffiles"
+cat > "$stage/DEBIAN/control" <<EOF
+Package: jasp
+Version: $version
+Architecture: arm64
+Section: sound
+Priority: optional
+Maintainer: Jasp contributors
+Depends: libc6 (>= 2.41), libgcc-s1, libasound2t64, libegl1, libgl1, libgl1-mesa-dri, libwayland-client0, libwayland-egl1, libxkbcommon0, libxkbcommon-x11-0, libx11-6, libxcursor1, libxi6, libxrandr2
+Recommends: fonts-noto-cjk, cage, libpam-systemd, sudo
+Description: Native Raspberry Pi music player for jastreamer and moOde
+ Launch Jasp from a desktop session, or use the opt-in Cage kiosk service
+ on Raspberry Pi OS Lite. The optional moOde frontend does not replace
+ or modify the moOde backend.
+EOF
+dpkg-deb --root-owner-group --build "$stage" "target/packages/jasp_${version}_arm64.deb"

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Jasp
+Comment=Native music player for jastreamer and moOde
+Exec=jasp
+TryExec=jasp
+Icon=audio-x-generic
+Terminal=false
+Categories=AudioVideo;Audio;Player;

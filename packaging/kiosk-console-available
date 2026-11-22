@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+if [ "$(id -u)" -eq 0 ]; then
+    echo 'Jasp kiosk requires a non-root user.' >&2
+    exit 1
+fi
+
+if systemctl is-active --quiet display-manager.service localdisplay.service; then
+    echo 'Jasp kiosk will not replace an active display service.' >&2
+    exit 1
+fi
+
+seat=$(loginctl show-seat seat0 --property=ActiveSession --value) || exit 1
+case "$seat" in
+    ''|'-'|"${XDG_SESSION_ID-}") exit 0 ;;
+esac
+case $(loginctl show-session "$seat" --property=Type --value) in
+    tty) exit 0 ;;
+    *) printf 'Jasp kiosk will not replace the active seat0 graphical session.\n' >&2; exit 1 ;;
+esac

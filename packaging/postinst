@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+case ${1:-} in
+    configure)
+        if [ -e /usr/local/bin/moodeutl ] || [ -e /usr/bin/moodeutl ]; then
+            printf '\nJasp installed. To open it on the Pi display without changing boot settings:\n'
+            printf '  DISPLAY=:0 jasp --server http://127.0.0.1 --fullscreen\n\n'
+        else
+            printf '\nJasp installed. Open Jasp from the desktop menu, or log in on the Pi console and type: jasp\n'
+            printf 'On a Lite console Jasp opens fullscreen and offers to start automatically at boot.\n'
+            printf 'For an SSH-only setup: jasp autostart enable\n\n'
+        fi ;;
+esac

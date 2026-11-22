@@ -1,0 +1,33 @@
+[Unit]
+Description=Jasp kiosk on tty8 (%i)
+Wants=dbus.socket systemd-logind.service
+After=dbus.socket systemd-logind.service systemd-user-sessions.service plymouth-quit-wait.service
+ConditionPathExists=/dev/tty0
+ConditionPathExists=/dev/tty8
+ConditionPathExists=/usr/bin/cage
+ConditionPathExists=!/etc/systemd/system/display-manager.service
+ConditionPathExists=!/usr/local/bin/moodeutl
+ConditionPathExists=!/usr/bin/moodeutl
+
+[Service]
+Type=simple
+User=%i
+PAMName=jasp-kiosk
+Environment=XDG_SESSION_TYPE=wayland
+Environment=JASP_LITE_KIOSK=1
+ExecCondition=/usr/libexec/jasp/kiosk-console-available
+ExecStart=/usr/bin/cage -s -- /usr/bin/jasp --fullscreen
+ExecStartPost=+/usr/bin/chvt 8
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+TTYPath=/dev/tty8
+TTYReset=yes
+TTYVHangup=yes
+UtmpIdentifier=tty8
+UtmpMode=user
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target
