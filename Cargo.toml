@@ -1,6 +1,6 @@
 [package]
 name = "jasp"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 rust-version = "1.88"
 description = "Native Raspberry Pi frontend for jastreamer with optional moOde support"

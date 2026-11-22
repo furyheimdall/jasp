@@ -225,23 +225,76 @@ fn check_lease(deadline: &Mutex<Instant>) -> Result<()> {
     Ok(())
 }
 
-struct Stream {
+struct Track {
     reader: Box<dyn FormatReader>,
     decoder: Box<dyn Decoder>,
+    id: u32,
+    discard_before: u64,
+}
+
+struct Stream {
+    track: Option<Track>,
+    ahead: Option<DecodeAhead>,
     pcm: Option<(PCM, Format)>,
     rate: u32,
     channels: usize,
     codec: SourceCodec,
     source_bits: Option<u32>,
-    track: u32,
     active: bool,
     ended: bool,
     tail: Tail,
     total_frames: Option<u64>,
     frame: u64,
-    discard_before: u64,
     samples: Vec<u8>,
     offset: usize,
+}
+
+enum Decoded { Samples(Vec<u8>), End, Error(anyhow::Error) }
+
+struct DecodeAhead {
+    ready: Receiver<Decoded>,
+    spare: SyncSender<Vec<u8>>,
+    worker: thread::JoinHandle<Track>,
+    format: Format,
+}
+
+impl DecodeAhead {
+    fn start(mut track: Track, output: OutputFormat) -> Result<Self> {
+        const BLOCKS: usize = 12;
+        // Approximately 100 ms of audio per block, with a fixed pool of blocks.
+        let target = (output.rate as usize / 10).max(1) * output.channels * (output.pcm.physical_width()? as usize / 8);
+        let (spare, reuse) = mpsc::sync_channel(BLOCKS);
+        let (send, ready) = mpsc::sync_channel(BLOCKS + 1); // One slot for EOF or an error.
+        for _ in 0..BLOCKS {
+            spare.send(Vec::with_capacity(target)).expect("decoder owns spare buffers");
+        }
+        let worker = thread::Builder::new().name("jastreamer-decode".into()).spawn(move || {
+            while let Ok(mut block) = reuse.recv() {
+                block.clear();
+                match track.fill(&mut block, target, output) {
+                    Ok(end) => {
+                        if !block.is_empty() && send.send(Decoded::Samples(block)).is_err() { break; }
+                        if end {
+                            let _ = send.send(Decoded::End);
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = send.send(Decoded::Error(error));
+                        break;
+                    }
+                }
+            }
+            track
+        })?;
+        Ok(Self { ready, spare, worker, format: output.pcm })
+    }
+
+    fn stop(self) -> Result<Track> {
+        drop(self.ready);
+        drop(self.spare);
+        self.worker.join().map_err(|_| anyhow!("USB audio decoder terminated unexpectedly"))
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -298,8 +351,9 @@ impl Stream {
         ensure!(channels == 1 || channels == 2, "USB direct output supports mono and stereo");
         let id = track.id;
         let decoder = symphonia::default::get_codecs().make(params, &DecoderOptions::default())?;
-        Ok(Self { reader, decoder, pcm: None, rate, channels, codec, source_bits, track: id, active: false,
-            ended: false, tail: Tail::Reading, total_frames, frame: 0, discard_before: 0, samples: Vec::new(), offset: 0 })
+        let track = Track { reader, decoder, id, discard_before: 0 };
+        Ok(Self { track: Some(track), ahead: None, pcm: None, rate, channels, codec, source_bits, active: false,
+            ended: false, tail: Tail::Reading, total_frames, frame: 0, samples: Vec::new(), offset: 0 })
     }
 
     fn play(&mut self, device: &str, deadline: &Mutex<Instant>) -> Result<()> {
@@ -336,6 +390,12 @@ impl Stream {
             pcm.sw_params(&sw)?;
         }
         pcm.prepare()?;
+        if let Some(ahead) = &self.ahead {
+            ensure!(ahead.format == format, "USB PCM format changed while samples were buffered");
+        } else if self.tail == Tail::Reading {
+            let track = self.track.take().context("no USB audio decoder available")?;
+            self.ahead = Some(DecodeAhead::start(track, self.output_format(format))?);
+        }
         self.pcm = Some((pcm, format));
         self.active = true;
         // ALSA's PREPARED state is not playback. Report Play only after it
@@ -382,53 +442,41 @@ impl Stream {
     }
 
     fn seek_frame(&mut self, frame: u64) -> Result<()> {
-        let seeked = self.reader.seek(SeekMode::Accurate, SeekTo::TimeStamp { ts: frame, track_id: self.track })?;
-        self.decoder.reset();
-        self.discard_before = seeked.required_ts;
+        if let Some(ahead) = self.ahead.take() { self.track = Some(ahead.stop()?); }
+        let track = self.track.as_mut().context("no USB audio decoder available")?;
+        self.samples.clear();
+        self.offset = 0;
+        let seeked = track.reader.seek(SeekMode::Accurate, SeekTo::TimeStamp { ts: frame, track_id: track.id })?;
+        track.decoder.reset();
+        track.discard_before = seeked.required_ts;
         self.frame = frame;
         self.ended = false;
         self.tail = Tail::Reading;
-        self.samples.clear();
-        self.offset = 0;
         Ok(())
     }
 
     fn status(&self) -> Status {
         Status { active: self.active, ended: self.ended,
             ms: self.position().saturating_mul(1000) / u64::from(self.rate),
-            format: self.pcm.as_ref().map(|(_, pcm)| OutputFormat { codec: self.codec, rate: self.rate,
-                channels: self.channels, source_bits: self.source_bits, pcm: *pcm }), }
+            format: self.pcm.as_ref().map(|(_, pcm)| self.output_format(*pcm)), }
     }
 
-    fn decode_chunk(&mut self, format: Format) -> Result<()> {
-        self.samples.clear();
-        self.offset = 0;
-        let packet = match self.reader.next_packet() {
-            Ok(packet) => packet,
-            Err(DecodeError::IoError(err)) if err.kind() == io::ErrorKind::UnexpectedEof => {
-                self.tail = Tail::Decoded;
-                return Ok(());
-            }
-            Err(err) => return Err(err.into()),
-        };
-        let skip = self.discard_before.saturating_sub(packet.ts()) as usize;
-        let audio = self.decoder.decode(&packet)?;
-        ensure!(audio.spec().rate == self.rate && audio.spec().channels.count() == self.channels,
-            "audio format changed midstream");
-        match audio {
-            AudioBufferRef::S32(decoded) if self.codec == SourceCodec::Flac =>
-                interleave(&mut self.samples, &decoded, skip, self.channels, format, |sample| sample),
-            AudioBufferRef::F32(decoded) if self.codec == SourceCodec::Mp3 =>
-                interleave(&mut self.samples, &decoded, skip, self.channels, format, i32::from_sample),
-            _ => return Err(anyhow!("unexpected decoder sample format")),
-        }
-        Ok(())
+    fn output_format(&self, pcm: Format) -> OutputFormat {
+        OutputFormat { codec: self.codec, rate: self.rate, channels: self.channels, source_bits: self.source_bits, pcm }
     }
 
     fn pump(&mut self, deadline: &Mutex<Instant>) -> Result<()> {
         if self.offset == self.samples.len() && self.tail == Tail::Reading {
-            let format = self.pcm.as_ref().expect("playing owns PCM").1;
-            self.decode_chunk(format)?;
+            let ahead = self.ahead.as_ref().expect("playing owns a decoder");
+            if !self.samples.is_empty() { let _ = ahead.spare.send(std::mem::take(&mut self.samples)); }
+            self.offset = 0;
+            match ahead.ready.try_recv() {
+                Ok(Decoded::Samples(samples)) => self.samples = samples,
+                Ok(Decoded::End) => self.tail = Tail::Decoded,
+                Ok(Decoded::Error(error)) => return Err(error),
+                Err(mpsc::TryRecvError::Empty) => return Ok(()),
+                Err(mpsc::TryRecvError::Disconnected) => return Err(anyhow!("USB audio decoder stopped before end of track")),
+            }
         }
         let (pcm, _) = self.pcm.as_ref().expect("playing owns PCM");
         check_lease(deadline)?;
@@ -438,18 +486,47 @@ impl Stream {
             match pcm.io_bytes().writei(data) {
                 Ok(frames) => { self.offset += frames * stride; self.frame += frames as u64; }
                 Err(e) if e.errno() == 11 => {}, // EAGAIN: the hardware buffer is full.
+                // EPIPE: ALSA consumed the queued frames. Prepare again and retry the
+                // same unwritten samples; don't insert silence or advance the position.
+                Err(e) if e.errno() == 32 => pcm.prepare().context("recovering USB audio underrun")?,
                 Err(e) => return Err(e.into()),
             }
         } else if self.tail != Tail::Reading {
             if self.tail == Tail::Decoded {
                 ensure!(self.total_frames.is_none_or(|total| self.frame == total), "FLAC length differs from STREAMINFO");
             }
-            if drain_pcm(&mut self.tail, || pcm.drain(), || pcm.state())? {
+            // An underrun just before the decoder signalled EOF also means ALSA
+            // has no frames left. Don't turn that track boundary into a failure.
+            if pcm.state() == State::XRun || drain_pcm(&mut self.tail, || pcm.drain(), || pcm.state())? {
                 self.ended = true;
                 self.release();
             }
         }
         Ok(())
+    }
+}
+
+impl Track {
+    fn fill(&mut self, samples: &mut Vec<u8>, target: usize, output: OutputFormat) -> Result<bool> {
+        while samples.len() < target {
+            let packet = match self.reader.next_packet() {
+                Ok(packet) => packet,
+                Err(DecodeError::IoError(err)) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(true),
+                Err(err) => return Err(err.into()),
+            };
+            let skip = self.discard_before.saturating_sub(packet.ts()) as usize;
+            let audio = self.decoder.decode(&packet)?;
+            ensure!(audio.spec().rate == output.rate && audio.spec().channels.count() == output.channels,
+                "audio format changed midstream");
+            match audio {
+                AudioBufferRef::S32(decoded) if output.codec == SourceCodec::Flac =>
+                    interleave(samples, &decoded, skip, output.channels, output.pcm, |sample| sample),
+                AudioBufferRef::F32(decoded) if output.codec == SourceCodec::Mp3 =>
+                    interleave(samples, &decoded, skip, output.channels, output.pcm, i32::from_sample),
+                _ => return Err(anyhow!("unexpected decoder sample format")),
+            }
+        }
+        Ok(false)
     }
 }
 
@@ -514,13 +591,22 @@ mod tests {
             let mut stream = Stream::open(codec, Box::new(Cursor::new(source))).unwrap();
             assert_eq!((stream.rate, stream.channels, stream.source_bits), (44_100, 2, source_bits));
             stream.seek(150).unwrap();
+            let format = stream.output_format(output);
+            let ahead = DecodeAhead::start(stream.track.take().unwrap(), format).unwrap();
             let mut bytes = 0;
             let mut audible = false;
-            while stream.tail == Tail::Reading {
-                stream.decode_chunk(output).unwrap();
-                bytes += stream.samples.len();
-                audible |= stream.samples.iter().any(|&byte| byte != 0);
+            loop {
+                match ahead.ready.recv().unwrap() {
+                    Decoded::Samples(block) => {
+                        bytes += block.len();
+                        audible |= block.iter().any(|&byte| byte != 0);
+                        ahead.spare.send(block).ok();
+                    }
+                    Decoded::End => break,
+                    Decoded::Error(error) => panic!("{error}"),
+                }
             }
+            ahead.stop().unwrap();
             let bytes_per_frame = if source_bits.is_some() { 4 } else { 8 };
             assert_eq!(bytes / bytes_per_frame, 8_820);
             assert!(audible);
