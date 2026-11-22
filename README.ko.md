@@ -16,6 +16,13 @@ Jasp는 Rust로 개발한 Raspberry Pi용 네이티브 터치스크린 음악 �
 
 **비트 퍼펙트 표시**는 DAC 출력의 실측값이 아니라 앱에서 확인한 재생 경로를 기준으로 합니다.
 
+## 스크린샷
+
+| | jastreamer | moOde |
+| --- | --- | --- |
+| 라이브러리 | ![jastreamer 라이브러리](docs/screenshots/jastreamer-library.webp) | ![moOde 라이브러리](docs/screenshots/moode-library.webp) |
+| 대기열 | ![jastreamer 대기열](docs/screenshots/jastreamer-queue.webp) | ![moOde 대기열](docs/screenshots/moode-queue.webp) |
+
 ## 설치와 실행
 
 [릴리스](https://github.com/furyheimdall/jasp/releases)에서 ARM64 `.deb`와 SHA-256 체크섬을 내려받으세요. 패키지는 **64비트 Raspberry Pi OS 또는 Debian 13(Trixie)** 용입니다. Pi에서 다음 명령을 실행하세요.

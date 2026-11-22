@@ -16,6 +16,13 @@ Jasp is a native touchscreen music player for Raspberry Pi, written in Rust. It 
 
 **Bit-perfect labels** describe the playback path Jasp can verify in software, not a measurement at the DAC.
 
+## Screenshots
+
+| | jastreamer | moOde |
+| --- | --- | --- |
+| Library | ![jastreamer library](docs/screenshots/jastreamer-library.webp) | ![moOde library](docs/screenshots/moode-library.webp) |
+| Queue | ![jastreamer queue](docs/screenshots/jastreamer-queue.webp) | ![moOde queue](docs/screenshots/moode-queue.webp) |
+
 ## Install and run
 
 Download the ARM64 `.deb` and its SHA-256 checksum from [Releases](https://github.com/furyheimdall/jasp/releases). The package targets **64-bit Raspberry Pi OS / Debian 13 (Trixie)**. On the Pi:
