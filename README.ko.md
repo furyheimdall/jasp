@@ -1,6 +1,6 @@
 # Jasp
 
-[English](README.md) · **한국어**
+[English](README.md) · **한국어** · [제품 소개](https://furyheimdall.github.io/jasp/ko/)
 
 Jasp는 Rust로 개발한 **Raspberry Pi용 네이티브 jastreamer 음악 플레이어**입니다. 기존 [jastreamer Server](https://github.com/furyheimdall/jastreamer)에 연결해 라이브러리를 탐색하고 대기열을 관리하며, Pi에 연결된 USB DAC으로 음악을 재생합니다.
 

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Jasp is the native Raspberry Pi music player for jastreamer Server. Browse, queue, and play through the USB DAC connected to your Pi.">
+  <title>Jasp — Native jastreamer player for Raspberry Pi</title>
+  <link rel="stylesheet" href="site.css">
+  <link rel="alternate" hreflang="ko" href="ko/">
+</head>
+<body>
+  <header class="shell top">
+    <a class="brand" href="./"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span> Jasp</a>
+    <nav aria-label="Main navigation"><a href="#screens">Screens</a><a href="#setup">Setup</a><a href="ko/" hreflang="ko" lang="ko">한국어</a></nav>
+  </header>
+  <main class="shell">
+    <section class="hero" aria-labelledby="intro">
+      <div class="eyebrow">JASTREAMER CLIENT · RASPBERRY PI</div>
+      <h1 id="intro">The native jastreamer player for Raspberry Pi</h1>
+      <p>Jasp is a native Raspberry Pi player for your existing jastreamer Server. Browse your library, manage the queue, and play music through the USB DAC connected to your Pi.</p>
+      <div class="actions"><a class="primary" href="https://github.com/furyheimdall/jasp/releases/latest">Download for ARM64</a><a class="secondary" href="https://github.com/furyheimdall/jasp">View source</a></div>
+      <p class="meta">64-bit Raspberry Pi OS (Trixie) · Desktop or fullscreen Lite kiosk</p>
+    </section>
+    <section id="screens" class="section" aria-labelledby="screens-title">
+      <h2 id="screens-title">Library and queue</h2>
+      <div class="gallery">
+        <figure><img src="screenshots/jastreamer-library.webp" width="1280" height="720" alt="Jasp library with album covers and browsing filters"><figcaption>Browse albums, artists, and folders.</figcaption></figure>
+        <figure><img src="screenshots/jastreamer-queue.webp" width="1280" height="720" loading="lazy" alt="Jasp queue with track covers and reorder controls"><figcaption>Play, reorder, or remove tracks from the queue.</figcaption></figure>
+      </div>
+    </section>
+    <section id="setup" class="section" aria-labelledby="setup-title">
+      <h2 id="setup-title">How it fits your setup</h2>
+      <dl class="details">
+        <div><dt>Server and player</dt><dd><a href="https://furyheimdall.github.io/jastreamer/">jastreamer Server</a> hosts the library and queue. Jasp connects to it; it does not replace the Server.</dd></div>
+        <div><dt>Local USB audio</dt><dd>Connect a USB DAC to the Pi. Configure network outputs in the jastreamer web interface. See the installation guide for supported source formats.</dd></div>
+        <div><dt>Optional moOde UI</dt><dd>On a Pi already running moOde, Jasp can replace the local web player without replacing the moOde backend, MPD, or its library.</dd></div>
+      </dl>
+      <a class="text-link" href="https://github.com/furyheimdall/jasp#install-and-run">Read the installation guide →</a>
+    </section>
+  </main>
+  <footer class="shell footer">Jasp for Raspberry Pi <a href="https://github.com/furyheimdall/jasp/blob/main/LICENSE">MIT license</a></footer>
+</body>
+</html>
