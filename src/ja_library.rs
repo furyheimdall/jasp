@@ -549,18 +549,18 @@ fn count(n: usize) -> String { format!("{n} {}", if n == 1 { "track" } else { "t
 
 fn pill(ui: &mut Ui, label: &str, active: bool, width: f32) -> egui::Response {
     let animation = ui.ctx().animate_bool_with_time(ui.id().with(("catalog-pill", label)), active, 0.17);
-    ui.add(egui::Button::new(RichText::new(tr(ui, label)).size(15.0).strong().color(if active { theme::accent(ui) } else { MUTED }))
+    ui.add(crate::ui::centered_button(RichText::new(tr(ui, label)).size(15.0).strong().color(if active { theme::accent(ui) } else { MUTED }))
         .fill(theme::raised(ui).gamma_multiply(animation)).stroke(Stroke::new(1.0, theme::accent(ui).gamma_multiply(animation * 0.45)))
         .corner_radius(16).min_size(vec2(width, BAND_HEIGHT)).selected(active))
 }
 
 fn band_button(ui: &mut Ui, label: &str, width: f32, enabled: bool) -> egui::Response {
-    ui.add_enabled(enabled, egui::Button::new(RichText::new(tr(ui, label)).size(14.0).color(TEXT))
+    ui.add_enabled(enabled, crate::ui::centered_button(RichText::new(tr(ui, label)).size(14.0).color(TEXT))
         .fill(theme::raised(ui)).corner_radius(8).min_size(vec2(width, BAND_HEIGHT)))
 }
 
 fn tool(ui: &mut Ui, label: &str, enabled: bool) -> egui::Response {
-    ui.add_enabled(enabled, egui::Button::new(RichText::new(tr(ui, label)).size(14.0).color(TEXT))
+    ui.add_enabled(enabled, crate::ui::centered_button(RichText::new(tr(ui, label)).size(14.0).color(TEXT))
         .fill(theme::raised(ui)).corner_radius(8).min_size(vec2(65.0, 40.0)))
 }
 

@@ -1,4 +1,4 @@
-use crate::{autostart::{Autostart, Backend}, dialog, settings::tr, ui::{MUTED, WARNING, button}};
+use crate::{autostart::{Autostart, Backend}, dialog, settings::{tr, widgets}, ui::{MUTED, WARNING, button}};
 use eframe::egui::{self, RichText, Ui};
 use std::{fs::OpenOptions, path::PathBuf, sync::mpsc::{self, Receiver}};
 
@@ -124,33 +124,34 @@ impl Startup {
             return;
         };
         let moode_kiosk = state.backend == Backend::Moode && std::env::var("JASP_MOODE_KIOSK").as_deref() == Ok("1");
-        ui.add_space(8.0);
-        ui.label(RichText::new(tr(ui, if moode_kiosk { "Next boot" } else { "Autostart" })).strong());
-        let choice = match state.backend {
-            Backend::Moode | Backend::Desktop => {
-                let options = if moode_kiosk { [crate::APP_NAME, "moOde Web UI"] } else { ["Enable autostart", "Disable autostart"] };
-                ui.add_enabled_ui(editable && self.pending.is_none(), |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        options.into_iter().zip([true, false]).filter_map(|(label, enable)|
-                            button(ui, label, enable == state.enabled).clicked().then_some(enable)
-                        ).last()
+        widgets::section(ui, if moode_kiosk { "Next boot" } else { "Autostart" }, |ui| {
+            let choice = match state.backend {
+                Backend::Moode | Backend::Desktop => {
+                    let options = if moode_kiosk { [crate::APP_NAME, "moOde Web UI"] } else { ["Enable autostart", "Disable autostart"] };
+                    ui.add_enabled_ui(editable && self.pending.is_none(), |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            options.into_iter().zip([true, false]).filter_map(|(label, enable)|
+                                widgets::choice(ui, label, enable == state.enabled).clicked().then_some(enable)
+                            ).last()
+                        }).inner
                     }).inner
-                }).inner
-            }
-            Backend::Lite => {
-                if editable && !state.enabled && self.console_request.is_some() && button(ui, "Enable autostart", true).clicked() {
-                    self.prompt = Some(dialog::Animation::default());
                 }
-                ui.monospace(if state.enabled { "jasp autostart disable" } else { "jasp autostart enable" });
-                None
-            }
-        };
-        if let Some(enable) = choice && enable != state.enabled { self.change(ui.ctx(), enable); }
-        let hint = if self.pending.is_some() { "Updating autostart…" }
-            else if !editable { "Read-only mode cannot change autostart." }
-            else if state.backend == Backend::Desktop { "Changes apply the next time you log in." }
-            else { "Changes apply on the next boot. The current player stays open." };
-        ui.weak(tr(ui, hint));
-        if let Some(error) = &self.error { ui.label(RichText::new(error).color(WARNING)); }
+                Backend::Lite => {
+                    if editable && !state.enabled && self.console_request.is_some()
+                        && widgets::button(ui, "Enable autostart", true).clicked() {
+                        self.prompt = Some(dialog::Animation::default());
+                    }
+                    ui.monospace(if state.enabled { "jasp autostart disable" } else { "jasp autostart enable" });
+                    None
+                }
+            };
+            if let Some(enable) = choice && enable != state.enabled { self.change(ui.ctx(), enable); }
+            let hint = if self.pending.is_some() { "Updating autostart…" }
+                else if !editable { "Read-only mode cannot change autostart." }
+                else if state.backend == Backend::Desktop { "Changes apply the next time you log in." }
+                else { "Changes apply on the next boot. The current player stays open." };
+            widgets::hint(ui, hint);
+            if let Some(error) = &self.error { ui.label(RichText::new(error).color(WARNING)); }
+        });
     }
 }

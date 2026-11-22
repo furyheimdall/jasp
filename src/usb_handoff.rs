@@ -215,7 +215,7 @@ fn action_button(ui: &mut Ui, text: &str, primary: bool) -> egui::Response {
     let normal = theme::raised(ui);
     let (fill, text_color) = if primary { (theme::accent(ui), theme::ON_ACCENT) }
         else { (normal, MUTED) };
-    ui.add(egui::Button::new(RichText::new(tr(ui, text)).size(15.0).strong().color(text_color))
+    ui.add(crate::ui::centered_button(RichText::new(tr(ui, text)).size(15.0).strong().color(text_color))
         .fill(fill).min_size(egui::vec2(if primary { 139.0 } else { 86.0 }, 43.0)).corner_radius(12))
 }
 

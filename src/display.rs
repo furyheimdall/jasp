@@ -1,4 +1,4 @@
-use super::{read_preference, save_preference, tr};
+use super::{read_preference, save_preference, tr, widgets};
 use eframe::egui::{self, Event, RawInput, Ui};
 use crate::theme;
 use serde::{Deserialize, Serialize};
@@ -202,7 +202,7 @@ impl Display {
 
     pub(crate) fn show(&mut self, ui: &mut Ui) {
         if !self.available() {
-            ui.label(tr(ui, "This display is managed by the desktop session."));
+            widgets::card(ui, |ui| widgets::hint(ui, "This display is managed by the desktop session."));
             return;
         }
         let mut next = self.applied;
@@ -216,17 +216,14 @@ impl Display {
         if let Some(panel) = &self.panel {
             let brightness = next.brightness.unwrap_or_else(|| panel.percent(panel.normal));
             let mut value = brightness;
-            display_card(ui, |ui| slider(ui, "Brightness", &mut value, 100, "%"));
+            widgets::card(ui, |ui| slider(ui, "Brightness", &mut value, 100, "%"));
             if value != brightness { next.brightness = Some(value); }
-            ui.add_space(12.0);
         }
-        display_card(ui, |ui| {
-            ui.label(egui::RichText::new(tr(ui, "When idle")).size(20.0).strong());
-            ui.add_space(6.0);
+        widgets::section(ui, "When idle", |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
                 for mode in [Mode::System, Mode::On, Mode::Off, Mode::Dim] {
-                    if self.supports(mode) && mode_button(ui, mode, next.mode == mode).clicked() {
+                    if self.supports(mode) && widgets::choice(ui, mode.label(), next.mode == mode).clicked() {
                         next.mode = mode;
                     }
                 }
@@ -310,28 +307,6 @@ impl Drop for Display {
     fn drop(&mut self) {
         if self.save_at.is_some() { self.save(); }
     }
-}
-
-fn display_card(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
-    let width = ui.available_width().min(790.0);
-    egui::Frame::new().fill(theme::card(ui)).stroke(egui::Stroke::new(1.0, theme::line(ui)))
-        .corner_radius(14).inner_margin(14).show(ui, |ui| {
-            ui.set_width((width - 30.0).max(0.0));
-            content(ui);
-        });
-}
-
-fn mode_button(ui: &mut Ui, mode: Mode, selected: bool) -> egui::Response {
-    let accent = theme::accent(ui);
-    let phase = ui.ctx().animate_bool_with_time(ui.id().with(mode.label()), selected, 0.20);
-    let text = egui::RichText::new(tr(ui, mode.label())).size(17.0).strong()
-        .color(egui::Color32::WHITE.lerp_to_gamma(accent, phase));
-    let control = egui::Button::selectable(selected, text).min_size(egui::vec2(104.0, 54.0))
-        .frame_when_inactive(true)
-        .corner_radius(10)
-        .fill(theme::raised(ui).lerp_to_gamma(accent, phase * 0.16))
-        .stroke(egui::Stroke::new(1.0 + 0.5 * phase, theme::line(ui).lerp_to_gamma(accent, phase)));
-    ui.add(control)
 }
 
 fn touch_slider(ui: &mut Ui, label: &str, value: &mut u8, max: u8, unit: &str) -> egui::Response {

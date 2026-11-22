@@ -420,7 +420,7 @@ fn queue_library(path: &str, kind: EntryKind, placement: QueuePlacement) -> Comm
 
 fn action_button(ui: &mut Ui, label: &str, enabled: bool) -> egui::Response {
     let label = tr(ui, label);
-    ui.add_enabled(enabled, egui::Button::new(RichText::new(label).size(15.0).strong())
+    ui.add_enabled(enabled, crate::ui::centered_button(RichText::new(label).size(15.0).strong())
         .fill(theme::raised(ui)).corner_radius(7).min_size(vec2(64.0, 44.0)))
 }
 

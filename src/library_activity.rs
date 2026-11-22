@@ -190,6 +190,7 @@ fn card(ui: &mut Ui, kind: Kind, status: &Status) -> bool {
                 _ => {}
             }
             let dismiss = if matches!(status, Status::Failed(_)) { "Acknowledge" } else { "Hide" };
-            crate::ui::button(ui, dismiss, false).clicked()
+            ui.add_space(4.0);
+            ui.vertical_centered(|ui| crate::ui::button(ui, dismiss, false).clicked()).inner
         }).inner
 }

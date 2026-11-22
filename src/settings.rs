@@ -1,9 +1,11 @@
-use crate::{chrome, model::{Command, Entry, RepeatMode, Snapshot}, settings_web, theme::{ON_ACCENT, Theme}};
+use crate::{model::{Command, Entry, Snapshot}, settings_web, theme::Theme};
 use eframe::egui::{self, RichText, Ui};
 use std::{borrow::Cow, fs, path::PathBuf};
 
 #[path = "display.rs"]
 mod display;
+#[path = "settings_widgets.rs"]
+pub(crate) mod widgets;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Language { #[default] English, Korean }
@@ -42,6 +44,22 @@ pub(crate) fn tr<'a>(ui: &Ui, text: &'a str) -> Cow<'a, str> {
         "Library" => "라이브러리", "Settings" => "설정", "Outputs" => "오디오 출력", "Language" => "언어",
         "Sign out" => "로그아웃", "Sign in" => "로그인", "Server URL" => "서버 주소", "Username" => "사용자 이름",
         "Password" => "비밀번호", "Connect / Verify" => "서버 확인", "Refresh" => "새로 고침", "Rescan USB" => "USB 다시 검색",
+        "Not connected" => "연결되지 않음",
+        "Read only · Server playback and outputs cannot be changed" => "읽기 전용 · 서버 재생과 출력을 변경할 수 없어요.",
+        "Invalid jastreamer server address." => "jastreamer 서버 주소가 올바르지 않아요.",
+        "Could not reach the jastreamer server." => "jastreamer 서버에 연결할 수 없어요.",
+        "This jastreamer server is not compatible." => "지원하지 않는 jastreamer 서버예요.",
+        "jastreamer sign-in expired. Sign in again." => "jastreamer 세션이 만료됐어요. 다시 로그인하세요.",
+        "Could not verify the saved jastreamer sign-in." => "저장된 jastreamer 로그인을 확인하지 못했어요.",
+        "Could not read saved jastreamer settings." => "저장된 jastreamer 설정을 읽지 못했어요.",
+        "Signed in, but could not save the jastreamer session." => "로그인했지만 jastreamer 세션을 저장하지 못했어요.",
+        "The jastreamer USB output was released." => "jastreamer USB 출력 연결이 해제됐어요.",
+        "USB output closed; server release was not confirmed." => "USB 출력을 닫았지만 서버에서의 해제는 확인하지 못했어요.",
+        "jastreamer USB output error." => "jastreamer USB 출력에 문제가 생겼어요.",
+        "jastreamer request failed." => "jastreamer 요청을 처리하지 못했어요.",
+        "The selected jastreamer output is unavailable." => "선택한 jastreamer 출력을 사용할 수 없어요.",
+        "jastreamer playback failed." => "jastreamer에서 재생하지 못했어요.",
+        "The renderer reported a playback error. Press Play to resume." => "출력 장치에서 재생 오류가 발생했어요. 재생 버튼을 눌러 다시 시작하세요.",
         "Albums" => "앨범", "Artists" => "아티스트", "Genres" => "장르", "Folders" => "폴더", "Sources" => "음악 소스",
         "Playlists" => "재생목록", "Tracks" => "곡", "Most played" => "많이 재생한 곡", "Liked" => "좋아요", "Search" => "검색",
         "Keyboard" => "키보드", "Hide keys" | "Hide" => "숨기기", "Back" | "‹  Back" => "‹ 뒤로", "Up" => "상위 폴더",
@@ -55,7 +73,7 @@ pub(crate) fn tr<'a>(ui: &Ui, text: &'a str) -> Cow<'a, str> {
         "FILE UNAVAILABLE" => "파일을 찾을 수 없음",
         "Search this collection" => "이 목록 검색", "Search music" => "음악 검색", "Search results" => "검색 결과",
         "Loading library…" => "라이브러리 불러오는 중…", "Refresh sources" => "소스 새로 고침",
-        "Playback" => "재생", "Repeat" => "반복 재생", "Shuffle" => "무작위 재생", "Library settings" => "라이브러리 설정",
+        "Library settings" => "라이브러리 설정",
         "Sequential order" => "순차 재생", "Shuffle order" => "랜덤 재생",
         "Repeat off" => "반복 끄기", "Repeat one" => "한 곡 반복", "Repeat all" => "전체 반복",
         "Track details" => "곡 상세 정보", "Album artist" => "앨범 아티스트", "Duration" => "재생 시간",
@@ -65,7 +83,7 @@ pub(crate) fn tr<'a>(ui: &Ui, text: &'a str) -> Cow<'a, str> {
         "Channels" => "채널", "Bitrate" => "비트레이트", "Library path" => "라이브러리 경로",
         "Loading track details…" => "곡 상세 정보를 불러오는 중…",
         "Detailed tags could not be loaded." => "상세 태그를 불러오지 못했어요.",
-        "Enable moOde mode" => "moOde 모드 사용",
+        "moOde mode" => "moOde 모드",
         "Only hides moOde in Jasp. It does not stop the moOde server." =>
             "Jasp에서 moOde 모드만 숨겨요. moOde 서버는 중지하지 않아요.",
         "Next boot" => "다음 부팅 화면",
@@ -96,28 +114,17 @@ pub(crate) fn tr<'a>(ui: &Ui, text: &'a str) -> Cow<'a, str> {
         "Release USB DAC" => "USB DAC 연결 해제", "Stop other output" => "다른 출력 정지", "Only the session is saved, never your password. Use HTTP only on a trusted LAN." => "비밀번호는 저장하지 않아요. HTTP는 신뢰할 수 있는 LAN에서만 사용하세요.",
         "Sign in to manage the jastreamer library." | "Sign in to view server library settings." => "라이브러리 설정을 보려면 jastreamer에 로그인하세요.",
         "Library sources" => "라이브러리 소스",
-        "Paths refer to directories on the jastreamer server." => "경로는 jastreamer 서버의 디렉터리를 가리켜요.",
+        "Manage sources in the jastreamer web UI." => "소스는 jastreamer 웹 UI에서 관리하세요.",
         "No library sources configured." => "등록된 라이브러리 소스가 없어요.",
-        "Server configuration changed. Discard edits to load the current sources." => "서버 설정이 변경됐어요. 편집을 취소하면 최신 소스를 불러와요.",
-        "Remove source" => "소스 제거", "Name" => "이름", "Server path" => "서버 경로",
-        "Add source" => "소스 추가", "Save sources" => "소스 저장", "Discard edits" => "편집 취소",
-        "Wait for the active scan before saving sources." => "진행 중인 검색이 끝난 뒤 소스를 저장하세요.",
-        "Every source needs a name and server path." => "모든 소스에 이름과 서버 경로를 입력하세요.",
-        "Saving removes the selected sources from the library. It does not delete media files." => "선택한 소스가 라이브러리에서 제거돼요. 음악 파일은 삭제하지 않아요.",
-        "Confirm removal and save" => "제거 확인 후 저장",
         "Library scan" => "라이브러리 검색",
         "Incremental scan" => "변경 파일 검색", "Full scan" => "전체 검색",
-        "Save or discard source edits before starting a scan." => "검색을 시작하기 전에 소스 편집을 저장하거나 취소하세요.",
         "Stop scan" => "검색 중단", "Processed" => "처리", "Updated" => "변경",
         "New files" => "신규 추가", "Deleted / missing" => "삭제·누락", "Errors" => "오류",
         "Scanning jastreamer library…" => "jastreamer 라이브러리 검색 중…",
         "jastreamer scan complete" => "jastreamer 검색 완료", "jastreamer scan cancelled" => "jastreamer 검색 취소",
         "jastreamer scan problem" => "jastreamer 검색 오류",
-        "Library sources saved. No scan was started." => "소스를 저장했어요. 검색은 아직 시작하지 않았어요.",
-        "Could not create a library source ID." => "라이브러리 소스 ID를 만들 수 없어요.",
         "Library request could not be queued. Try again." => "라이브러리 요청을 보내지 못했어요. 다시 시도하세요.",
-        "Read-only mode cannot change library settings or start or stop scans." => "읽기 전용 모드에서는 라이브러리 설정을 변경하거나 검색을 제어할 수 없어요.",
-        "Server configuration changed. Refresh before saving library sources." => "서버 설정이 변경됐어요. 새로 고침 후 소스를 저장하세요.",
+        "Read-only mode cannot start or stop scans." => "읽기 전용 모드에서는 검색을 시작하거나 중단할 수 없어요.",
         "Music sources" => "음악 소스", "Stored playlists" => "저장된 재생목록", "Play queue" => "대기열",
         "ALBUM" => "앨범", "albums" => "앨범", "track" | "tracks" => "곡",
         "Unknown artist" => "알 수 없는 아티스트", "Untitled track" => "제목 없는 곡",
@@ -185,17 +192,24 @@ pub(crate) fn tr<'a>(ui: &Ui, text: &'a str) -> Cow<'a, str> {
         "Lossless at this stage" => "이 단계의 무손실 확인", "Lossy source" => "손실 압축 원본",
         "PCM format changed" => "PCM 형식 변환 확인", "PCM bit depth decreased" => "PCM 비트 깊이가 감소했어요.",
         "Acknowledge" => "확인",
-        "General" => "일반", "Back to settings" => "설정으로 돌아가기",
-        "USB DAC and player output" => "USB DAC 및 플레이어 출력",
-        "Music sources and library scans" => "음악 소스 및 라이브러리 검색",
-        "System, network, audio and other moOde options" => "시스템·네트워크·오디오 등 moOde 설정",
+        "General" => "일반", "moOde settings" => "moOde 설정",
+        "No MPD output is enabled." => "활성화된 MPD 출력이 없어요.",
+        "MPD output not reported." => "MPD 출력 정보를 확인하지 못했어요.",
+        "Configured MPD output" => "설정된 MPD 출력",
+        "moOde uses its own audio configuration; this screen does not rewrite it." => "moOde의 기존 오디오 설정은 그대로 유지돼요.",
+        "Select jastreamer in the sidebar and sign in to use the USB device there." => "jastreamer에서 이 USB 장치를 사용하려면 로그인하세요.",
+        "Stop moOde playback before assigning this USB output to jastreamer." => "이 USB 출력을 jastreamer에 할당하려면 먼저 moOde 재생을 멈추세요.",
+        "The registered USB device is not currently detected." => "등록된 USB 장치를 찾지 못했어요.",
+        "Manage network outputs in the jastreamer web UI." => "네트워크 출력은 jastreamer 웹 UI에서 관리하세요.",
+        "Active in jastreamer" => "jastreamer에서 사용 중", "Registered" => "등록됨",
+        "Current server output" => "현재 서버 출력",
+        "Launch moOde settings" => "moOde 설정 열기",
         "Touch keyboard" => "터치 키보드", "Library search" => "라이브러리 검색",
         "Shift" => "대문자", "Space" => "띄어쓰기", "Backspace" => "지우기",
         "USB audio" => "USB 오디오", "Switching output" => "오디오 출력 전환 중",
-        "moOde theme" => "moOde 테마", "jastreamer theme" => "jastreamer 테마",
         "Green" => "녹색", "Orange" => "주황색", "Blue" => "파란색",
         "Monochrome" => "흑백", "Violet" => "보라색",
-        "Display" => "화면", "Brightness and idle behavior" => "밝기 및 화면 꺼짐",
+        "Display" => "화면",
         "Brightness" => "밝기", "When idle" => "입력이 없을 때", "System default" => "시스템 기본값",
         "Always on" => "항상 켜기", "Turn off after inactivity" => "시간 후 끄기",
         "Dim after inactivity" => "시간 후 어둡게", "Idle minutes" => "대기 시간",
@@ -250,17 +264,17 @@ impl View {
     pub(crate) fn moode_enabled(&self) -> bool { self.moode_enabled }
 
     pub(crate) fn app_options(&mut self, ui: &mut Ui) {
-        ui.label(RichText::new("jastreamer · moOde").size(12.0).color(crate::ui::MUTED));
-        ui.add_space(4.0);
-        let mut enabled = self.moode_enabled;
-        if ui.checkbox(&mut enabled, tr(ui, "Enable moOde mode")).changed() {
-            match save_preference("moode-mode", if enabled { "on" } else { "off" }) {
-                Ok(()) => { self.moode_enabled = enabled; self.preference_error = None; ui.ctx().request_repaint(); }
-                Err(_) => self.preference_error = Some(tr(ui, "Could not save moOde mode").into_owned()),
+        widgets::card(ui, |ui| {
+            if widgets::toggle(ui, "moOde mode", self.moode_enabled).clicked() {
+                let enabled = !self.moode_enabled;
+                match save_preference("moode-mode", if enabled { "on" } else { "off" }) {
+                    Ok(()) => { self.moode_enabled = enabled; self.preference_error = None; ui.ctx().request_repaint(); }
+                    Err(_) => self.preference_error = Some(tr(ui, "Could not save moOde mode").into_owned()),
+                }
             }
-        }
-        ui.label(RichText::new(tr(ui, "Only hides moOde in Jasp. It does not stop the moOde server."))
-            .size(12.0).color(crate::ui::MUTED));
+            widgets::hint(ui, "Only hides moOde in Jasp. It does not stop the moOde server.");
+        });
+        self.show_preference_error(ui);
     }
 
     pub(crate) fn web_open(&self) -> bool { self.web.is_open() }
@@ -269,11 +283,13 @@ impl View {
 
     pub(crate) fn general(&mut self, ui: &mut Ui) {
         let mut choice = self.language;
-        ui.horizontal_wrapped(|ui| {
-            ui.label(tr(ui, "Language"));
-            for (language, label) in [(Language::English, "English"), (Language::Korean, "한국어")] {
-                if crate::ui::button(ui, label, choice == language).clicked() { choice = language; }
-            }
+        widgets::section(ui, "Language", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                for (language, label) in [(Language::English, "English"), (Language::Korean, "한국어")] {
+                    if widgets::choice(ui, label, choice == language).clicked() { choice = language; }
+                }
+            });
         });
         if choice != self.language {
             self.language = choice;
@@ -282,29 +298,30 @@ impl View {
             self.install_language(ui.ctx());
             ui.ctx().request_repaint();
         }
-        for (label, file, selected) in [
-            ("moOde theme", "theme-moode", &mut self.moode_theme),
-            ("jastreamer theme", "theme-jastreamer", &mut self.jastreamer_theme),
-        ] {
-            if file == "theme-moode" && !self.moode_enabled { continue; }
-            ui.add_space(5.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.add_sized([112.0, 43.0], egui::Label::new(tr(ui, label)));
-                for theme in Theme::ALL {
-                    let palette = theme.palette();
-                    let active = *selected == theme;
-                    let label = RichText::new(tr(ui, theme.label())).color(if active { ON_ACCENT } else { palette.accent });
-                    let control = egui::Button::new(label).min_size(egui::vec2(65.0, 43.0)).corner_radius(8)
-                        .fill(if active { palette.accent } else { palette.card })
-                        .stroke(egui::Stroke::new(1.0, palette.accent.gamma_multiply(0.50)));
-                    if ui.add(control).clicked() && !active {
-                        *selected = theme;
-                        self.preference_error = save_preference(file, theme.key()).err().map(|error| format!("Could not save theme: {error}"));
-                        ui.ctx().request_repaint();
+        widgets::card(ui, |ui| {
+            for (label, file, selected) in [
+                ("moOde", "theme-moode", &mut self.moode_theme),
+                ("jastreamer", "theme-jastreamer", &mut self.jastreamer_theme),
+            ] {
+                if file == "theme-moode" && !self.moode_enabled { continue; }
+                ui.push_id(file, |ui| ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(3.0, 4.0);
+                    ui.add_sized([102.0, 42.0], egui::Label::new(RichText::new(label).size(16.0)));
+                    for theme in Theme::ALL {
+                        let active = *selected == theme;
+                        if widgets::swatch(ui, theme.label(), active, theme.palette().accent).clicked() && !active {
+                            *selected = theme;
+                            self.preference_error = save_preference(file, theme.key()).err().map(|error| format!("Could not save theme: {error}"));
+                            ui.ctx().request_repaint();
+                        }
                     }
-                }
-            });
-        }
+                }));
+            }
+        });
+        self.show_preference_error(ui);
+    }
+
+    fn show_preference_error(&self, ui: &mut Ui) {
         if let Some(error) = &self.preference_error { ui.label(RichText::new(error).color(crate::ui::WARNING)); }
     }
 
@@ -313,62 +330,47 @@ impl View {
         self.sources = sources;
     }
 
-    pub(crate) fn playback(ui: &mut Ui, snapshot: Option<&Snapshot>, can_edit: bool) -> Option<Command> {
-        let mut action = None;
-        ui.horizontal_wrapped(|ui| {
-            if let Some(snapshot) = snapshot {
-                let mut random = snapshot.random;
-                ui.label(tr(ui, "Repeat"));
-                ui.add_enabled_ui(can_edit, |ui| {
-                    egui::ComboBox::from_id_salt("mpd-repeat")
-                        .selected_text(tr(ui, chrome::repeat_label(snapshot.repeat)))
-                        .show_ui(ui, |ui| {
-                            for mode in [RepeatMode::Off, RepeatMode::One, RepeatMode::All] {
-                                if ui.selectable_label(snapshot.repeat == mode, tr(ui, chrome::repeat_label(mode))).clicked()
-                                    && snapshot.repeat != mode {
-                                    action = Some(Command::SetRepeat(mode));
-                                }
-                            }
-                        });
-                });
-                if ui.add_enabled(can_edit, egui::Checkbox::new(&mut random, tr(ui, "Shuffle"))).changed() {
-                    action = Some(Command::SetRandom(random));
-                }
-            }
-        });
-        action
-    }
-
     pub(crate) fn library(&mut self, ui: &mut Ui, snapshot: Option<&Snapshot>, can_edit: bool,
         (refresh_blocked, scanning, scan_failed): (bool, bool, bool)) -> Option<Command> {
         let mut action = None;
-        ui.horizontal_wrapped(|ui| {
-            let selected = self.sources.iter().find(|item| item.path == self.source)
-                .map_or_else(|| tr(ui, "All sources"), |entry| Cow::Borrowed(entry.label.as_str()));
-            egui::ComboBox::from_id_salt("moode-scan-source").selected_text(selected).width(180.0).show_ui(ui, |ui| {
-                if ui.selectable_label(self.source.is_empty(), tr(ui, "All sources")).clicked() { self.source.clear(); }
-                for item in &self.sources {
-                    if ui.selectable_label(self.source == item.path, &item.label).clicked() { self.source.clone_from(&item.path); }
+        widgets::section(ui, "Library sources", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let selected = self.sources.iter().find(|item| item.path == self.source)
+                    .map_or_else(|| tr(ui, "All sources"), |entry| Cow::Borrowed(entry.label.as_str()));
+                egui::ComboBox::from_id_salt("moode-scan-source").selected_text(RichText::new(selected).size(17.0))
+                    .width(200.0).show_ui(ui, |ui| {
+                        if widgets::choice(ui, "All sources", self.source.is_empty()).clicked() {
+                            self.source.clear();
+                            ui.close();
+                        }
+                        for item in &self.sources {
+                            let clicked = ui.push_id(&item.path, |ui| widgets::choice(ui, &item.label, self.source == item.path).clicked()).inner;
+                            if clicked {
+                                self.source.clone_from(&item.path);
+                                ui.close();
+                            }
+                        }
+                    });
+                if ui.add_enabled_ui(!refresh_blocked, |ui| widgets::button(ui, "Refresh sources", false)).inner.clicked() {
+                    action = Some(Command::LoadLibrarySettings { notify: true });
                 }
             });
-            if ui.add_enabled_ui(!refresh_blocked, |ui| crate::ui::button(ui, "Refresh sources", false)).inner.clicked() {
-                action = Some(Command::LoadLibrarySettings { notify: true });
-            }
+            if self.sources.is_empty() { widgets::hint(ui, "No indexed sources reported."); }
         });
         let updating = scanning || snapshot.is_some_and(|snapshot| snapshot.library_updating);
-        ui.horizontal_wrapped(|ui| {
-            ui.add_enabled_ui(can_edit && !updating && !scan_failed, |ui| {
-                if crate::ui::button(ui, "Scan changes", true).clicked() {
-                    action = Some(Command::ScanLibrary { path: self.source.clone(), full: false });
-                }
-                if crate::ui::button(ui, "Full rescan", false).clicked() {
-                    action = Some(Command::ScanLibrary { path: self.source.clone(), full: true });
-                }
+        widgets::section(ui, "Library scan", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.add_enabled_ui(can_edit && !updating && !scan_failed, |ui| {
+                    if widgets::button(ui, "Scan changes", true).clicked() {
+                        action = Some(Command::ScanLibrary { path: self.source.clone(), full: false });
+                    }
+                    if widgets::button(ui, "Full rescan", false).clicked() {
+                        action = Some(Command::ScanLibrary { path: self.source.clone(), full: true });
+                    }
+                });
             });
+            widgets::hint(ui, if updating { "Database scan is running…" } else { "The selected source is scanned by MPD." });
         });
-        ui.label(tr(ui, if updating { "Database scan is running…" } else if self.sources.is_empty() {
-            "No indexed sources reported."
-        } else { "The selected source is scanned by MPD." }));
         action
     }
 

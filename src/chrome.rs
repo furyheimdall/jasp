@@ -13,6 +13,10 @@ struct StatusMotion {
 }
 
 pub(crate) fn status_ticker(ui: &mut Ui, key: &str, prefix: &str, text: &str, tint: Color32) {
+    status_ticker_details(ui, key, prefix, text, tint, None);
+}
+
+pub(crate) fn status_ticker_details(ui: &mut Ui, key: &str, prefix: &str, text: &str, tint: Color32, details: Option<&str>) {
     let id = ui.id().with(key);
     let frame = ui.ctx().cumulative_frame_nr();
     let now = ui.input(|input| input.time);
@@ -44,7 +48,11 @@ pub(crate) fn status_ticker(ui: &mut Ui, key: &str, prefix: &str, text: &str, ti
         -((t - enter - hold) * 70.0).clamp(0.0, overflow)
     };
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &galley.job.text));
-    if overflow > 0.0 { response.on_hover_text(galley.job.text.as_str()); }
+    if let Some(details) = details {
+        response.on_hover_text(details);
+    } else if overflow > 0.0 {
+        response.on_hover_text(galley.job.text.as_str());
+    }
     ui.painter().with_clip_rect(row).galley(row.min + vec2(x, 0.0), galley, tint);
     if t < enter || (overflow > 0.0 && (enter + hold..enter + hold + travel).contains(&t)) {
         ui.ctx().request_repaint();

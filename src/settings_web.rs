@@ -1,4 +1,4 @@
-use crate::settings::tr;
+use crate::settings::{tr, widgets};
 use eframe::egui;
 use reqwest::Url;
 use serde_json::json;
@@ -126,27 +126,29 @@ impl Viewer {
 }
 
 pub(crate) fn show(ui: &mut egui::Ui, moode_origin: &str, web: &mut Viewer) {
-    ui.label(tr(ui, "These pages open in a private Chromium window. Playback and library pages are not available there."));
-    ui.horizontal_wrapped(|ui| {
-        for (index, (_, label)) in PAGES.iter().enumerate() {
-            if let Some(label) = label
-                && ui
-                    .add_enabled(web.browser.is_none(), egui::Button::new(tr(ui, label)).min_size(egui::vec2(68.0, 44.0)))
-                    .clicked()
-            {
-                match Browser::start(moode_origin, index, ui.ctx().clone()) {
-                    Ok(browser) => {
-                        web.browser = Some(browser);
-                        web.error = None;
-                    }
-                    Err(error) => web.error = Some(error),
+    widgets::section(ui, "Launch moOde settings", |ui| {
+        widgets::hint(ui, "These pages open in a private Chromium window. Playback and library pages are not available there.");
+        let selected = ui.add_enabled_ui(web.browser.is_none(), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                PAGES.iter().enumerate().filter_map(|(index, (_, label))| {
+                    let label = label.as_ref()?;
+                    widgets::button(ui, label, false).clicked().then_some(index)
+                }).last()
+            }).inner
+        }).inner;
+        if let Some(index) = selected {
+            match Browser::start(moode_origin, index, ui.ctx().clone()) {
+                Ok(browser) => {
+                    web.browser = Some(browser);
+                    web.error = None;
                 }
+                Err(error) => web.error = Some(error),
             }
         }
+        if let Some(error) = web.error {
+            ui.colored_label(ui.visuals().error_fg_color, tr(ui, error));
+        }
     });
-    if let Some(error) = web.error {
-        ui.colored_label(ui.visuals().error_fg_color, tr(ui, error));
-    }
 }
 
 type WindowResult = Result<(), &'static str>;

@@ -5,7 +5,7 @@ use crate::{
     ja_library::Library,
     ja_library_admin_ui::AdminView,
     model::{QueuePlacement, TrackDetails},
-    settings::tr,
+    settings::{tr, widgets as settings_ui},
     theme, ui::{MUTED, WARNING, RailIcon, button, rail_item},
     track_dialog::TrackDialog,
 };
@@ -239,7 +239,7 @@ impl View {
 
     pub(crate) fn library_settings(&mut self, ui: &mut Ui, activity: &mut crate::library_activity::Activity) {
         if !self.signed_in {
-            ui.label(tr(ui, "Sign in to manage the jastreamer library."));
+            settings_ui::section(ui, "jastreamer", |ui| settings_ui::hint(ui, "Sign in to manage the jastreamer library."));
             return;
         }
         let tx = &self.worker.tx;
@@ -348,8 +348,8 @@ impl View {
             self.send(Action::Logout);
         }
         if !compact {
-            let label = self.identity.as_deref().unwrap_or("Not connected");
-            ui.add(egui::Label::new(RichText::new(label).size(12.0).color(MUTED)).truncate()).on_hover_text(label);
+            let label = self.identity.as_deref().map_or_else(|| tr(ui, "Not connected"), std::borrow::Cow::Borrowed);
+            ui.add(egui::Label::new(RichText::new(label.as_ref()).size(12.0).color(MUTED)).truncate()).on_hover_text(label);
         }
     }
 
@@ -379,12 +379,34 @@ impl View {
     }
 
     pub fn status(&self, ui: &mut Ui) {
-        if let Some(error) = &self.error { chrome::status_ticker(ui, "ja-request-error", "", error, WARNING); }
-        if let Some(error) = self.player.as_ref().map(|s| s.error.as_str()).filter(|s| !s.is_empty()) {
-            chrome::status_ticker(ui, "ja-player-error", "", error, WARNING);
+        if let Some(error) = &self.error {
+            let message = error.split_once(": ").map_or(error.as_str(), |(message, _)| message);
+            let summary = match message {
+                "invalid jastreamer URL" | "use a jastreamer HTTP(S) origin without credentials or a path" => "Invalid jastreamer server address.",
+                "jastreamer discovery request failed" => "Could not reach the jastreamer server.",
+                "incompatible jastreamer server" => "This jastreamer server is not compatible.",
+                "Saved jastreamer session expired; sign in again." | "jastreamer session expired; sign in again" => "jastreamer sign-in expired. Sign in again.",
+                "Could not verify the saved sign-in. Use Connect / Verify to try again." => "Could not verify the saved jastreamer sign-in.",
+                "Could not read saved jastreamer settings" => "Could not read saved jastreamer settings.",
+                "Signed in, but could not remember this session" => "Signed in, but could not save the jastreamer session.",
+                "Local output released" => "The jastreamer USB output was released.",
+                "DAC closed; server release could not be confirmed" => "USB output closed; server release was not confirmed.",
+                "USB DAC" => "jastreamer USB output error.",
+                _ => "jastreamer request failed.",
+            };
+            status_error(ui, "ja-request-error", summary, error);
+        }
+        if let Some(state) = self.player.as_ref().filter(|state| !state.error.is_empty()) {
+            let summary = match (state.state.as_str(), state.error.as_str()) {
+                ("unavailable", _) => "The selected jastreamer output is unavailable.",
+                (_, "The renderer reported a playback error. Press Play to resume.") => state.error.as_str(),
+                _ => "jastreamer playback failed.",
+            };
+            status_error(ui, "ja-player-error", summary, &state.error);
         }
         if self.read_only {
-            chrome::status_ticker(ui, "ja-read-only", "", "READ ONLY  ·  Server playback and outputs cannot be changed", MUTED);
+            let label = tr(ui, "Read only · Server playback and outputs cannot be changed");
+            chrome::status_ticker(ui, "ja-read-only", "", label.as_ref(), MUTED);
         }
     }
 
@@ -631,21 +653,23 @@ impl View {
         let player = self.player.as_ref();
         let active = player.map_or("", |s| s.renderer_id.as_str());
         let allowed = self.signed_in && self.enabled() && !moode_playing;
-        ui.label(RichText::new(tr(ui, "USB devices")).size(22.0).strong());
-        ui.label(RichText::new(tr(ui, "Local USB audio · Direct output without a software mixer.")).color(MUTED));
+        settings_ui::hint(ui, "Local USB audio · Direct output without a software mixer.");
         if self.devices.is_empty() {
-            ui.label(RichText::new(tr(ui, "No USB playback device detected.")).color(MUTED));
+            settings_ui::hint(ui, "No USB playback device detected.");
         }
         for device in &self.devices {
+            ui.separator();
             let is_registered = self.local.as_ref().is_some_and(|(_, registered)| device == registered);
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(device).monospace());
+                ui.label(RichText::new(device).size(17.0).strong());
                 if is_registered {
                     let selected = self.using_usb();
-                    ui.label(RichText::new(if selected { "ACTIVE FOR JASTREAMER" } else { "REGISTERED" }).size(12.0).color(theme::accent(ui)));
+                    let status = if selected { "Active in jastreamer" } else { "Registered" };
+                    egui::Frame::new().fill(theme::raised(ui)).corner_radius(8).inner_margin(egui::Margin::symmetric(8, 4))
+                        .show(ui, |ui| ui.label(RichText::new(tr(ui, status)).size(14.0).color(theme::accent(ui))));
                 } else if self.local.is_none() {
                     ui.add_enabled_ui(allowed, |ui| {
-                        if button(ui, "Register for jastreamer", false).clicked() {
+                        if settings_ui::button(ui, "Register for jastreamer", false).clicked() {
                             command = Some(Action::Attach(device.clone()));
                         }
                     });
@@ -653,14 +677,14 @@ impl View {
             });
         }
         if !self.signed_in {
-            ui.label(RichText::new("Select jastreamer in the sidebar and sign in to use the USB device there.").color(MUTED));
+            settings_ui::hint(ui, "Select jastreamer in the sidebar and sign in to use the USB device there.");
         } else if moode_playing {
-            ui.label(RichText::new("Stop moOde playback before assigning this USB output to jastreamer.").color(WARNING));
+            ui.colored_label(WARNING, tr(ui, "Stop moOde playback before assigning this USB output to jastreamer."));
         }
         if let Some((id, device)) = &self.local {
             let selected = self.using_usb();
             if !self.devices.contains(device) {
-                ui.label(RichText::new("The registered USB device is not currently detected.").color(WARNING));
+                ui.colored_label(WARNING, tr(ui, "The registered USB device is not currently detected."));
             }
             ui.horizontal_wrapped(|ui| {
                 if !selected {
@@ -668,7 +692,7 @@ impl View {
                     let fallback = player.filter(|s| s.state == "unavailable" && !active.is_empty()
                         && !self.renderers.iter().any(|r| r.id == active && r.online));
                     ui.add_enabled_ui(allowed && self.devices.contains(device) && (stopped || fallback.is_some()), |ui| {
-                        if button(ui, "Use this USB DAC", true).clicked() {
+                        if settings_ui::button(ui, "Use this USB DAC", true).clicked() {
                             command = Some(if let Some(state) = fallback {
                                 Action::Fallback { renderer: id.clone(), expected: state.renderer_id.clone(), revision: state.revision }
                             } else { Action::Select(id.clone()) });
@@ -676,25 +700,34 @@ impl View {
                     });
                     if !active.is_empty() && !stopped && fallback.is_none() {
                         ui.add_enabled_ui(allowed && player.is_some_and(|s| s.capabilities.stop), |ui| {
-                            if button(ui, "Stop other output", false).clicked() {
+                            if settings_ui::button(ui, "Stop other output", false).clicked() {
                                 command = Some(Action::StopForUsb { expected: active.to_owned() });
                             }
                         });
                     }
                 }
                 ui.add_enabled_ui(!self.local_pending && !self.read_only, |ui| {
-                    if button(ui, "Release USB DAC", false).clicked() { command = Some(Action::Release); }
+                    if settings_ui::button(ui, "Release USB DAC", false).clicked() { command = Some(Action::Release); }
                 });
             });
         }
         if !active.is_empty() && !self.using_usb() {
-            ui.label(format!("Current server output: {}. This Pi plays only to local USB.", self.output_name(active)));
+            ui.label(format!("{}: {}", tr(ui, "Current server output"), self.output_name(active)));
         }
-        ui.label(RichText::new("Manage network outputs in the jastreamer web UI.").color(MUTED));
+        settings_ui::hint(ui, "Manage network outputs in the jastreamer web UI.");
         if let Some(command) = command {
             let pending = matches!(command, Action::Attach(_) | Action::Release);
             if self.send(command) && pending { self.local_pending = true; }
         }
+    }
+}
+
+fn status_error(ui: &mut Ui, key: &str, summary: &str, error: &str) {
+    let localized = tr(ui, summary);
+    if localized == summary {
+        chrome::status_ticker(ui, key, "", error, WARNING);
+    } else {
+        chrome::status_ticker_details(ui, key, "", localized.as_ref(), WARNING, Some(error));
     }
 }
 

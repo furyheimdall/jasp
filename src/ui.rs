@@ -1,6 +1,6 @@
 use crate::model::{Command, Connection, Event, QueuePlacement, Snapshot, Track};
 use crate::chrome::{self, Controls, Motion, Song, Transport};
-use crate::{dialog, settings::tr, theme, track_dialog::TrackDialog};
+use crate::{dialog, settings::{tr, widgets as settings_ui}, theme, track_dialog::TrackDialog};
 use eframe::egui::{self, Align, Align2, Color32, FontId, Painter, Rect, RichText, Sense, Stroke, TextureHandle, Ui, pos2, vec2};
 use std::time::Instant;
 
@@ -22,7 +22,7 @@ pub(crate) const WARNING: Color32 = Color32::from_rgb(252, 185, 125);
 enum Tab { Playing, Queue, Library }
 
 #[derive(Clone, Copy, PartialEq)]
-enum SettingsPage { Home, Display, Outputs, Library, Official }
+enum SettingsPage { General, App, Display, Outputs, Library, Official }
 
 #[derive(Clone, Copy)]
 enum ClearTarget { Moode(u64), Jastreamer(u64) }
@@ -38,9 +38,12 @@ impl QueueClear {
 }
 
 impl SettingsPage {
+    const ALL: [Self; 6] = [Self::General, Self::App, Self::Display, Self::Outputs, Self::Library, Self::Official];
+
     fn title(self) -> &'static str {
         match self {
-            Self::Home => "Settings",
+            Self::General => "General",
+            Self::App => crate::APP_NAME,
             Self::Display => "Display",
             Self::Outputs => "Outputs",
             Self::Library => "Library settings",
@@ -213,9 +216,8 @@ impl Player {
                 }
             }
         }
-        if rail_item(ui, RailIcon::Settings, "Settings", shared_open, compact, true, accent).clicked()
-            && self.settings_page != Some(SettingsPage::Home) {
-            self.enter_settings(SettingsPage::Home);
+        if rail_item(ui, RailIcon::Settings, "Settings", shared_open, compact, true, accent).clicked() && !shared_open {
+            self.enter_settings(SettingsPage::General);
         }
         ui.with_layout(egui::Layout::bottom_up(Align::Min), |ui| {
             if self.showing_ja { self.ja.account(ui, compact); }
@@ -242,29 +244,31 @@ impl Player {
     }
 
     fn outputs(&mut self, ui: &mut Ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(tr(ui, "This Pi · One player can use the USB DAC at a time.")).color(MUTED));
-            if button(ui, "Rescan USB", false).clicked() { self.refresh_outputs(); }
+        settings_ui::card(ui, |ui| {
+            settings_ui::hint(ui, "This Pi · One player can use the USB DAC at a time.");
+            if settings_ui::button(ui, "Rescan USB", false).clicked() { self.refresh_outputs(); }
         });
-        ui.add_space(10.0);
         let moode_playing = self.snapshot.as_ref().is_some_and(|s| s.state == "play" || s.state == "external");
-        setting_group(ui, "moOde", |ui| {
-            let configured = match &self.moode_outputs {
-                Some(list) if !list.is_empty() => format!("Configured MPD output: {}", list.join(", ")),
-                Some(_) => tr(ui, "No MPD output is enabled.").into(),
-                None => tr(ui, "MPD output not reported.").into(),
-            };
-            ui.label(configured);
-            let hint = if self.ja.owns_local() { "Press Play in moOde to switch the USB DAC from jastreamer." }
-                else { "moOde uses its own audio configuration; this screen does not rewrite it." };
-            ui.label(RichText::new(tr(ui, hint)).color(MUTED));
-        });
-        ui.add_space(10.0);
-        setting_group(ui, "jastreamer", |ui| self.ja.outputs(ui, moode_playing));
+        if self.settings.moode_enabled() {
+            settings_ui::section(ui, "moOde", |ui| {
+                match &self.moode_outputs {
+                    Some(list) if !list.is_empty() => {
+                        settings_ui::hint(ui, "Configured MPD output");
+                        ui.label(RichText::new(list.join(", ")).size(17.0).strong());
+                    }
+                    Some(_) => settings_ui::hint(ui, "No MPD output is enabled."),
+                    None => settings_ui::hint(ui, "MPD output not reported."),
+                };
+                let hint = if self.ja.owns_local() { "Press Play in moOde to switch the USB DAC from jastreamer." }
+                    else { "moOde uses its own audio configuration; this screen does not rewrite it." };
+                settings_ui::hint(ui, hint);
+            });
+        }
+        settings_ui::section(ui, "jastreamer", |ui| self.ja.outputs(ui, moode_playing));
     }
 
     fn enter_settings(&mut self, page: SettingsPage) {
-        self.entrance.begin_in(page != SettingsPage::Home || self.settings_page.is_none());
+        self.entrance.begin_in(self.settings_page.is_none_or(|current| (page as u8) > (current as u8)));
         self.settings_page = Some(page);
         match page {
             SettingsPage::Outputs => self.refresh_outputs(),
@@ -274,52 +278,71 @@ impl Player {
     }
 
     fn settings(&mut self, ui: &mut Ui, page: SettingsPage) {
-        if page != SettingsPage::Home && button(ui, "Back to settings", false).clicked() {
-            self.enter_settings(SettingsPage::Home);
-            return;
-        }
-        ui.label(RichText::new(tr(ui, page.title())).size(29.0).strong());
-        ui.add_space(7.0);
-        egui::ScrollArea::vertical().id_salt(page.title()).show(ui, |ui| match page {
-            SettingsPage::Home => {
-                setting_group(ui, "General", |ui| self.settings.general(ui));
-                setting_group(ui, crate::APP_NAME, |ui| {
+        let width = if ui.available_width() < 580.0 { 100.0 } else { 148.0 };
+        let selection = egui::SidePanel::left("settings-navigation").exact_width(width)
+            .resizable(false).show_separator_line(false)
+            .frame(egui::Frame::new().fill(theme::card(ui)).corner_radius(12).inner_margin(8))
+            .show_inside(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
+                ui.add_space(3.0);
+                ui.label(RichText::new(tr(ui, "Settings")).size(15.0).strong().color(MUTED));
+                ui.add_space(5.0);
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let mut selection = None;
+                    for item in SettingsPage::ALL {
+                        if self.showing_ja && item == SettingsPage::Official { continue; }
+                        let label = match item {
+                            SettingsPage::Library => "Library",
+                            SettingsPage::Official => "moOde settings",
+                            _ => item.title(),
+                        };
+                        if setting_nav_item(ui, label, item == page).clicked() && item != page {
+                            selection = Some(item);
+                        }
+                    }
+                    selection
+                }).inner
+            }).inner;
+        if let Some(next) = selection { self.enter_settings(next); }
+        let bounds = ui.available_rect_before_wrap();
+        let bounds = Rect::from_min_max(bounds.min + vec2(14.0, 0.0), bounds.max);
+        let entrance = self.entrance;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(bounds), |ui| {
+            entrance.show(ui, |ui| self.settings_content(ui, selection.unwrap_or(page)));
+        });
+    }
+
+    fn settings_content(&mut self, ui: &mut Ui, page: SettingsPage) {
+        egui::ScrollArea::vertical().id_salt(page.title()).show(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(settings_ui::WIDTH));
+            let spacing = ui.spacing_mut();
+            spacing.item_spacing = vec2(9.0, 7.0);
+            spacing.interact_size.y = 46.0;
+            ui.label(RichText::new(tr(ui, page.title())).size(29.0).strong());
+            ui.add_space(7.0);
+            match page {
+                SettingsPage::General => self.settings.general(ui),
+                SettingsPage::App => {
                     self.settings.app_options(ui);
                     self.startup.show(ui, !self.connection.read_only);
-                });
-                if !self.showing_ja {
+                }
+                SettingsPage::Display => self.settings.display.show(ui),
+                SettingsPage::Outputs => self.outputs(ui),
+                SettingsPage::Official => self.settings.official(ui, &self.connection.server),
+                SettingsPage::Library if self.showing_ja => self.ja.library_settings(ui, &mut self.library_activity),
+                SettingsPage::Library => {
+                    let pending = self.library_activity.pending();
                     let can_control = self.controls_available();
-                    if let Some(command) = setting_group(ui, "Playback", |ui|
-                        crate::settings::View::playback(ui, self.snapshot.as_ref(), can_control)) {
-                        self.send(command);
-                    }
-                }
-                for (next, hint) in [
-                    (SettingsPage::Display, "Brightness and idle behavior"),
-                    (SettingsPage::Outputs, "USB DAC and player output"),
-                    (SettingsPage::Library, "Music sources and library scans"),
-                    (SettingsPage::Official, "System, network, audio and other moOde options"),
-                ] {
-                    if next == SettingsPage::Official && self.showing_ja { continue; }
-                    if setting_link(ui, next.title(), hint) { self.enter_settings(next); }
-                }
-            }
-            SettingsPage::Display => self.settings.display.show(ui),
-            SettingsPage::Outputs => self.outputs(ui),
-            SettingsPage::Official => self.settings.official(ui, &self.connection.server),
-            SettingsPage::Library if self.showing_ja => self.ja.library_settings(ui, &mut self.library_activity),
-            SettingsPage::Library => {
-                let pending = self.library_activity.pending();
-                let can_control = self.controls_available();
-                if let Some(command) = self.settings.library(ui, self.snapshot.as_ref(), can_control, pending) {
-                    let kind = match &command {
-                        Command::ScanLibrary { .. } => LibraryActivity::Scan,
-                        _ => LibraryActivity::Sources,
-                    };
-                    self.library_activity.begin(kind);
-                    if !self.send(command) {
-                        let error = self.message.take().unwrap_or_default();
-                        self.library_activity.finish(kind, Err(error));
+                    if let Some(command) = self.settings.library(ui, self.snapshot.as_ref(), can_control, pending) {
+                        let kind = match &command {
+                            Command::ScanLibrary { .. } => LibraryActivity::Scan,
+                            _ => LibraryActivity::Sources,
+                        };
+                        self.library_activity.begin(kind);
+                        if !self.send(command) {
+                            let error = self.message.take().unwrap_or_default();
+                            self.library_activity.finish(kind, Err(error));
+                        }
                     }
                 }
             }
@@ -466,10 +489,10 @@ impl Player {
             if !ready { ui.label(RichText::new(tr(ui, "The queue changed. Cancel and review the updated queue.")).color(WARNING)); }
             ui.add_space(16.0);
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                let confirm = ui.add_enabled(ready, egui::Button::new(
+                let confirm = ui.add_enabled(ready, centered_button(
                     RichText::new(tr(ui, "Clear queue")).size(15.0).strong().color(theme::ON_ACCENT))
                     .fill(WARNING).min_size(vec2(116.0, 43.0)).corner_radius(12)).clicked();
-                let cancel = ui.add(egui::Button::new(RichText::new(tr(ui, "Cancel")).size(15.0))
+                let cancel = ui.add(centered_button(RichText::new(tr(ui, "Cancel")).size(15.0))
                     .min_size(vec2(82.0, 43.0)).corner_radius(12)).clicked();
                 (confirm && ready, cancel)
             }).inner
@@ -522,8 +545,7 @@ impl eframe::App for Player {
         let modal_open = self.handoff.active() || self.queue_clear.is_some() || self.track_dialog.is_some() || self.startup.active();
         if !modal_open && ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.wants_keyboard_input() {
             match self.settings_page {
-                Some(SettingsPage::Home) => { self.settings_page = None; self.entrance.begin_in(false); }
-                Some(_) => self.enter_settings(SettingsPage::Home),
+                Some(_) => { self.settings_page = None; self.entrance.begin_in(false); }
                 None => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             }
         }
@@ -566,16 +588,21 @@ impl eframe::App for Player {
                 self.sidebar(ui, compact)
             }).inner;
         let entrance = self.entrance;
-        egui::CentralPanel::default().frame(frame).show(ctx, |ui| entrance.show(ui, |ui| {
+        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             if modal_open { ui.disable(); }
-            if let Some(page) = self.settings_page { self.settings(ui, page); return; }
-            if self.showing_ja { self.ja.show(ui, &mut self.track_dialog); return; }
-            match self.tab {
-                Tab::Playing => { egui::ScrollArea::vertical().show(ui, |ui| self.playing(ui)); }
-                Tab::Queue => self.queue(ui),
-                Tab::Library => self.library(ui),
+            if let Some(page) = self.settings_page {
+                self.settings(ui, page);
+                return;
             }
-        }));
+            entrance.show(ui, |ui| {
+                if self.showing_ja { self.ja.show(ui, &mut self.track_dialog); return; }
+                match self.tab {
+                    Tab::Playing => { egui::ScrollArea::vertical().show(ui, |ui| self.playing(ui)); }
+                    Tab::Queue => self.queue(ui),
+                    Tab::Library => self.library(ui),
+                }
+            });
+        });
         if self.settings.web_open() { ctx.request_repaint(); }
         self.library_activity.show(ctx);
         if let Some(play) = self.ja.take_usb_play() { self.handoff.to_jastreamer(play, &mut self.ja); }
@@ -604,31 +631,26 @@ impl eframe::App for Player {
     }
 }
 
-fn setting_group<R>(ui: &mut Ui, title: &str, content: impl FnOnce(&mut Ui) -> R) -> R {
+fn setting_nav_item(ui: &mut Ui, label: &str, selected: bool) -> egui::Response {
     let width = ui.available_width();
-    let result = egui::Frame::new().fill(theme::raised(ui).gamma_multiply(0.68)).corner_radius(11).inner_margin(12)
-        .show(ui, |ui| {
-            ui.set_min_width((width - 24.0).max(0.0));
-            ui.label(RichText::new(tr(ui, title)).size(17.0).strong());
-            content(ui)
-        }).inner;
-    ui.add_space(8.0);
-    result
-}
-
-fn setting_link(ui: &mut Ui, title: &str, hint: &str) -> bool {
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 58.0), Sense::click());
-    let title = tr(ui, title);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title.as_ref()));
-    let tint = if response.hovered() || response.has_focus() { theme::accent(ui) } else { MUTED };
-    let painter = ui.painter();
-    painter.rect_filled(rect, 11, theme::raised(ui).gamma_multiply(if response.hovered() { 0.94 } else { 0.68 }));
-    let text = painter.with_clip_rect(rect.shrink2(vec2(12.0, 2.0)).with_max_x(rect.right() - 43.0));
-    text.text(rect.left_top() + vec2(12.0, 11.0), Align2::LEFT_TOP, title, FontId::proportional(17.0), ui.visuals().strong_text_color());
-    text.text(rect.left_top() + vec2(12.0, 34.0), Align2::LEFT_TOP, tr(ui, hint), FontId::proportional(12.0), MUTED);
-    painter.text(rect.right_center() - vec2(15.0, 0.0), Align2::RIGHT_CENTER, "›", FontId::proportional(23.0), tint);
-    ui.add_space(8.0);
-    response.clicked()
+    let label = tr(ui, label);
+    let text = ui.painter().layout(label.to_string(), FontId::proportional(16.0), Color32::PLACEHOLDER, (width - 20.0).max(1.0));
+    let (rect, response) = ui.allocate_exact_size(vec2(width, (text.size().y + 16.0).max(44.0)), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), selected, label.as_ref()));
+    let selection = ui.ctx().animate_bool_with_time(response.id.with("selected"), selected, 0.18);
+    let focus = ui.ctx().animate_bool_with_time(response.id.with("focus"), response.hovered() || response.has_focus(), 0.13);
+    let tint = theme::accent(ui);
+    let strength = (selection * 0.18 + focus * 0.09).min(0.25);
+    if strength > 0.0 {
+        ui.painter().rect_filled(rect, 8, theme::card(ui).lerp_to_gamma(tint, strength));
+    }
+    if selection > 0.0 {
+        let marker = Rect::from_min_size(rect.left_center() - vec2(0.0, 11.0), vec2(3.0, 22.0));
+        ui.painter().rect_filled(marker, 2, tint.gamma_multiply(selection));
+    }
+    let origin = rect.left_center() + vec2(10.0, -text.size().y * 0.5);
+    ui.painter().galley(origin, text, ui.visuals().strong_text_color().lerp_to_gamma(tint, selection));
+    response
 }
 
 #[derive(Clone, Copy)]
@@ -723,10 +745,15 @@ pub(crate) fn button(ui: &mut Ui, text: &str, selected: bool) -> egui::Response 
     button_text(ui, shown.as_ref(), selected)
 }
 
+pub(crate) fn centered_button(text: RichText) -> egui::Button<'static> {
+    // Balance the spare width on either side, regardless of the parent layout.
+    egui::Button::new((egui::Atom::grow(), text, egui::Atom::grow())).wrap()
+}
+
 fn button_text(ui: &mut Ui, text: &str, selected: bool) -> egui::Response {
     let phase = ui.ctx().animate_bool_with_time(ui.next_auto_id().with("selected"), selected, 0.14);
     let color = if phase >= 0.48 { theme::ON_ACCENT } else { Color32::WHITE };
-    ui.add(egui::Button::new(RichText::new(text).color(color).size(15.0).strong())
+    ui.add(centered_button(RichText::new(text).color(color).size(15.0).strong())
         .fill(theme::raised(ui).lerp_to_gamma(theme::accent(ui), phase)).corner_radius(7).min_size(vec2(58.0, 44.0)))
 }
 

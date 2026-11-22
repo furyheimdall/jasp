@@ -14,7 +14,7 @@ mod profile;
 mod track_details;
 mod usb_handoff;
 pub use catalog::{Browse, Catalog, Collection, QueueTarget, Rows, Scope};
-pub use library_admin::{LibraryAdmin, LibraryOp, LibraryUpdate, Root, ScanCounts, ScanJob};
+pub use library_admin::{LibraryAdmin, LibraryOp, LibraryUpdate, ScanCounts, ScanJob};
 
 const REGISTER: &str = "/api/v1/browser-output/registrations";
 const OWNER: &str = "X-Jastreamer-Browser-Token";
