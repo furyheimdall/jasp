@@ -22,7 +22,7 @@ pub(crate) const WARNING: Color32 = Color32::from_rgb(252, 185, 125);
 enum Tab { Playing, Queue, Library }
 
 #[derive(Clone, Copy, PartialEq)]
-enum SettingsPage { Home, Outputs, Library, Official }
+enum SettingsPage { Home, Display, Outputs, Library, Official }
 
 #[derive(Clone, Copy)]
 enum ClearTarget { Moode(u64), Jastreamer(u64) }
@@ -41,6 +41,7 @@ impl SettingsPage {
     fn title(self) -> &'static str {
         match self {
             Self::Home => "Settings",
+            Self::Display => "Display",
             Self::Outputs => "Outputs",
             Self::Library => "Library settings",
             Self::Official => "Official moOde settings",
@@ -78,7 +79,8 @@ pub struct Player {
 
 impl Player {
     pub fn new(connection: Connection, fit_bare_x11: Option<egui::Vec2>, ja: crate::ja_ui::View, show_moode: bool) -> Self {
-        let settings = crate::settings::View::new(show_moode);
+        let settings = crate::settings::View::new(show_moode, fit_bare_x11.is_some(),
+            std::env::var_os("JASP_LITE_KIOSK").as_deref() == Some(std::ffi::OsStr::new("1")));
         let showing_ja = !settings.moode_enabled() || ja.start_selected();
         let artwork = Artwork::new(connection.artwork.clone());
         Self {
@@ -293,6 +295,7 @@ impl Player {
                     }
                 }
                 for (next, hint) in [
+                    (SettingsPage::Display, "Brightness and idle behavior"),
                     (SettingsPage::Outputs, "USB DAC and player output"),
                     (SettingsPage::Library, "Music sources and library scans"),
                     (SettingsPage::Official, "System, network, audio and other moOde options"),
@@ -301,6 +304,7 @@ impl Player {
                     if setting_link(ui, next.title(), hint) { self.enter_settings(next); }
                 }
             }
+            SettingsPage::Display => self.settings.display.show(ui),
             SettingsPage::Outputs => self.outputs(ui),
             SettingsPage::Official => self.settings.official(ui, &self.connection.server),
             SettingsPage::Library if self.showing_ja => self.ja.library_settings(ui, &mut self.library_activity),
@@ -488,6 +492,10 @@ impl Player {
 }
 
 impl eframe::App for Player {
+    fn raw_input_hook(&mut self, _: &egui::Context, raw: &mut egui::RawInput) {
+        self.settings.display.input(raw);
+    }
+
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.settings.install_language(ctx);
         let theme = self.settings.theme(self.showing_ja);
@@ -505,7 +513,11 @@ impl eframe::App for Player {
         }
         self.ja.set_moode_usb_interlock(self.snapshot.as_ref().is_some_and(|state| state.state != "stop"));
         if self.splash.show(ctx, palette) { return; }
-        if self.official_settings_shell(ctx) { return; }
+        if self.official_settings_shell(ctx) {
+            self.settings.display.keep_awake();
+            return;
+        }
+        self.settings.display.tick(ctx);
         self.startup.poll(ctx, !self.connection.read_only);
         let modal_open = self.handoff.active() || self.queue_clear.is_some() || self.track_dialog.is_some() || self.startup.active();
         if !modal_open && ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.wants_keyboard_input() {

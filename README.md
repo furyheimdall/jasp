@@ -17,6 +17,10 @@ Use Jasp on the Raspberry Pi desktop or run it as a fullscreen touchscreen kiosk
 
 **Bit-perfect labels** describe the playback path Jasp can verify in software, not a measurement at the DAC.
 
+### Kiosk display
+
+In **Settings → Display**, choose the idle behavior and select **Apply display settings**. A dedicated X11 kiosk can keep its screen on or use the system timeout. With a writable panel backlight, Jasp can also adjust brightness, turn off the backlight after 1–120 minutes, or dim it. Touch the screen to restore its normal brightness. Desktop sessions keep their own screen and sleep settings.
+
 ## Screenshots
 
 ### jastreamer
@@ -36,8 +40,8 @@ Use Jasp on the Raspberry Pi desktop or run it as a fullscreen touchscreen kiosk
 Download the ARM64 `.deb` and its SHA-256 checksum from [Releases](https://github.com/furyheimdall/jasp/releases). The package targets **64-bit Raspberry Pi OS / Debian 13 (Trixie)**. On the Pi:
 
 ```sh
-sha256sum -c jasp_0.1.3_arm64.deb.sha256
-sudo apt install ./jasp_0.1.3_arm64.deb
+sha256sum -c jasp_0.1.4_arm64.deb.sha256
+sudo apt install ./jasp_0.1.4_arm64.deb
 ```
 
 | Environment | First launch | What autostart does |

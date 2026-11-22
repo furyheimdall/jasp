@@ -2,6 +2,9 @@ use crate::{chrome, model::{Command, Entry, RepeatMode, Snapshot}, settings_web,
 use eframe::egui::{self, RichText, Ui};
 use std::{borrow::Cow, fs, path::PathBuf};
 
+#[path = "display.rs"]
+mod display;
+
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Language { #[default] English, Korean }
 
@@ -192,11 +195,22 @@ pub(crate) fn tr<'a>(ui: &Ui, text: &'a str) -> Cow<'a, str> {
         "moOde theme" => "moOde 테마", "jastreamer theme" => "jastreamer 테마",
         "Green" => "녹색", "Orange" => "주황색", "Blue" => "파란색",
         "Monochrome" => "흑백", "Violet" => "보라색",
+        "Display" => "화면", "Brightness and idle behavior" => "밝기 및 화면 꺼짐",
+        "Brightness" => "밝기", "When idle" => "입력이 없을 때", "System default" => "시스템 기본값",
+        "Always on" => "항상 켜기", "Turn off after inactivity" => "시간 후 끄기",
+        "Dim after inactivity" => "시간 후 어둡게", "Idle minutes" => "대기 시간(분)",
+        "Dimmed brightness" => "어두울 때 밝기", "Touch the screen to wake it." => "화면을 터치하면 원래 밝기로 돌아옵니다.",
+        "Apply display settings" => "화면 설정 적용",
+        "This display is managed by the desktop session." => "이 화면은 데스크톱의 화면 설정에서 관리합니다.",
+        "Could not change the X11 idle timers." => "X11 화면 대기 시간을 변경하지 못했습니다.",
+        "Could not set the display brightness." => "화면 밝기를 변경하지 못했습니다.",
+        "Could not save display settings." => "화면 설정을 저장하지 못했습니다.",
         _ => text,
     })
 }
 
 pub(crate) struct View {
+    pub(crate) display: display::Display,
     language: Language,
     moode_theme: Theme,
     jastreamer_theme: Theme,
@@ -208,12 +222,13 @@ pub(crate) struct View {
 }
 
 impl View {
-    pub(crate) fn new(show_moode: bool) -> Self {
+    pub(crate) fn new(show_moode: bool, bare_x11: bool, lite: bool) -> Self {
         let language = if read_preference("language").is_some_and(|value| value.trim() == "ko") {
             Language::Korean
         } else { Language::English };
         let load_theme = |file, default| read_preference(file).and_then(|value| Theme::from_key(value.trim())).unwrap_or(default);
         Self {
+            display: display::Display::new(bare_x11, lite),
             language, moode_theme: load_theme("theme-moode", Theme::Blue),
             jastreamer_theme: load_theme("theme-jastreamer", Theme::Green),
             moode_enabled: match read_preference("moode-mode").as_deref().map(str::trim) {

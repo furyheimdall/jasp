@@ -17,6 +17,10 @@ Raspberry Pi 데스크톱 앱이나 전체 화면 터치스크린 키오스크�
 
 **비트 퍼펙트 표시**는 DAC 출력의 실측값이 아니라 앱에서 확인한 재생 경로를 기준으로 합니다.
 
+### 키오스크 화면 설정
+
+**설정 → 화면**에서 대기 동작을 선택한 뒤 **화면 설정 적용**을 누르세요. 전용 X11 키오스크에서는 화면을 항상 켜 두거나 시스템 기본값을 사용할 수 있습니다. 백라이트를 제어할 수 있는 패널에서는 화면 밝기를 조절하고, 1~120분 후 화면을 끄거나 어둡게 할 수 있습니다. 화면을 터치하면 원래 밝기로 돌아옵니다. 데스크톱 세션의 화면과 절전 설정은 변경하지 않습니다.
+
 ## 스크린샷
 
 ### jastreamer
@@ -36,8 +40,8 @@ Raspberry Pi 데스크톱 앱이나 전체 화면 터치스크린 키오스크�
 [릴리스](https://github.com/furyheimdall/jasp/releases)에서 ARM64 `.deb`와 SHA-256 체크섬을 내려받으세요. 패키지는 **64비트 Raspberry Pi OS 또는 Debian 13(Trixie)** 용입니다. Pi에서 다음 명령을 실행하세요.
 
 ```sh
-sha256sum -c jasp_0.1.3_arm64.deb.sha256
-sudo apt install ./jasp_0.1.3_arm64.deb
+sha256sum -c jasp_0.1.4_arm64.deb.sha256
+sudo apt install ./jasp_0.1.4_arm64.deb
 ```
 
 | 환경 | 첫 실행 | 자동 시작을 켰을 때 |
