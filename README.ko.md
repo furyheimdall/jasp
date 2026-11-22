@@ -18,10 +18,17 @@ Jasp는 Rust로 개발한 Raspberry Pi용 네이티브 터치스크린 음악 �
 
 ## 스크린샷
 
-| | jastreamer | moOde |
-| --- | --- | --- |
-| 라이브러리 | ![jastreamer 라이브러리](docs/screenshots/jastreamer-library.webp) | ![moOde 라이브러리](docs/screenshots/moode-library.webp) |
-| 대기열 | ![jastreamer 대기열](docs/screenshots/jastreamer-queue.webp) | ![moOde 대기열](docs/screenshots/moode-queue.webp) |
+### jastreamer
+
+![jastreamer 라이브러리](docs/screenshots/jastreamer-library.webp)
+
+![jastreamer 대기열](docs/screenshots/jastreamer-queue.webp)
+
+### moOde
+
+![moOde 라이브러리](docs/screenshots/moode-library.webp)
+
+![moOde 대기열](docs/screenshots/moode-queue.webp)
 
 ## 설치와 실행
 

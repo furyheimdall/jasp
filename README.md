@@ -18,10 +18,17 @@ Jasp is a native touchscreen music player for Raspberry Pi, written in Rust. It 
 
 ## Screenshots
 
-| | jastreamer | moOde |
-| --- | --- | --- |
-| Library | ![jastreamer library](docs/screenshots/jastreamer-library.webp) | ![moOde library](docs/screenshots/moode-library.webp) |
-| Queue | ![jastreamer queue](docs/screenshots/jastreamer-queue.webp) | ![moOde queue](docs/screenshots/moode-queue.webp) |
+### jastreamer
+
+![jastreamer library](docs/screenshots/jastreamer-library.webp)
+
+![jastreamer queue](docs/screenshots/jastreamer-queue.webp)
+
+### moOde
+
+![moOde library](docs/screenshots/moode-library.webp)
+
+![moOde queue](docs/screenshots/moode-queue.webp)
 
 ## Install and run
 
