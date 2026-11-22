@@ -1,5 +1,6 @@
 use super::{read_preference, save_preference, tr};
 use eframe::egui::{self, Event, RawInput, Ui};
+use crate::theme;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::{Path, PathBuf}, time::{Duration, Instant}};
 use x11rb::{connection::RequestConnection, protocol::{dpms::{self, ConnectionExt as _}, xproto::{ConnectionExt as _, GetScreenSaverReply}}, rust_connection::RustConnection};
@@ -136,7 +137,7 @@ pub(crate) struct Display {
     panel: Option<Backlight>,
     x11_timers: Option<X11Timers>,
     applied: Preference,
-    draft: Preference,
+    save_at: Option<Instant>,
     last_input: Instant,
     asleep: bool,
     wake_until: Option<Instant>,
@@ -146,11 +147,10 @@ pub(crate) struct Display {
 impl Display {
     pub(crate) fn new(x11: bool, lite: bool) -> Self {
         let panel = (x11 || lite).then(Backlight::detect).flatten();
-        let draft = Preference::load();
-        let mut display = Self { x11, panel, x11_timers: None, applied: Preference::default(), draft,
+        let mut display = Self { x11, panel, x11_timers: None, applied: Preference::default(), save_at: None,
             last_input: Instant::now(), asleep: false, wake_until: None, error: None };
         if display.available() {
-            display.apply();
+            display.apply(Preference::load());
         }
         display
     }
@@ -165,13 +165,12 @@ impl Display {
         }
     }
 
-    fn apply(&mut self) {
-        let mut next = self.draft;
+    fn apply(&mut self, mut next: Preference) -> bool {
         if !self.supports(next.mode) { next.mode = Mode::System; }
         if self.x11 && next.mode != Mode::System && self.x11_timers.is_none() {
             match X11Timers::suspend() {
                 Ok(timers) => self.x11_timers = Some(timers),
-                Err(_) => { self.error = Some("Could not change the X11 idle timers."); return; }
+                Err(_) => { self.error = Some("Could not change the X11 idle timers."); return false; }
             }
         }
         if let Some(panel) = &mut self.panel
@@ -180,16 +179,25 @@ impl Display {
             if panel.set(target).is_err() {
                 if self.applied.mode == Mode::System { self.x11_timers = None; }
                 self.error = Some("Could not set the display brightness.");
-                return;
+                return false;
             }
             panel.normal = target;
         }
         if next.mode == Mode::System { self.x11_timers = None; }
         self.applied = next;
-        self.draft = next;
         self.asleep = false;
         self.last_input = Instant::now();
         self.error = None;
+        true
+    }
+
+    fn save(&mut self) {
+        self.save_at = None;
+        if save_preference(FILE, &serde_json::to_string(&self.applied).expect("display preference serializes")).is_err() {
+            self.error = Some("Could not save display settings.");
+        } else if self.error == Some("Could not save display settings.") {
+            self.error = None;
+        }
     }
 
     pub(crate) fn show(&mut self, ui: &mut Ui) {
@@ -197,33 +205,63 @@ impl Display {
             ui.label(tr(ui, "This display is managed by the desktop session."));
             return;
         }
+        let mut next = self.applied;
+        let mut dragging = false;
+        let mut released = false;
+        let mut slider = |ui: &mut Ui, label: &str, value: &mut u8, max: u8, unit: &str| {
+            let result = touch_slider(ui, label, value, max, unit);
+            dragging |= result.dragged();
+            released |= result.drag_stopped();
+        };
         if let Some(panel) = &self.panel {
-            let mut brightness = self.draft.brightness.unwrap_or_else(|| panel.percent(panel.normal));
-            if ui.add(egui::Slider::new(&mut brightness, 1..=100).suffix("%").text(tr(ui, "Brightness"))).changed() {
-                self.draft.brightness = Some(brightness);
-            }
+            let brightness = next.brightness.unwrap_or_else(|| panel.percent(panel.normal));
+            let mut value = brightness;
+            display_card(ui, |ui| slider(ui, "Brightness", &mut value, 100, "%"));
+            if value != brightness { next.brightness = Some(value); }
+            ui.add_space(12.0);
         }
-        ui.label(tr(ui, "When idle"));
-        ui.horizontal_wrapped(|ui| {
-            for mode in [Mode::System, Mode::On, Mode::Off, Mode::Dim] {
-                if !self.supports(mode) { continue; }
-                if crate::ui::button(ui, mode.label(), mode == self.draft.mode).clicked() { self.draft.mode = mode; }
+        display_card(ui, |ui| {
+            ui.label(egui::RichText::new(tr(ui, "When idle")).size(20.0).strong());
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                for mode in [Mode::System, Mode::On, Mode::Off, Mode::Dim] {
+                    if self.supports(mode) && mode_button(ui, mode, next.mode == mode).clicked() {
+                        next.mode = mode;
+                    }
+                }
+            });
+            let timed = ui.ctx().animate_bool_with_time(ui.id().with("idle-timing"), next.mode.timed(), 0.20);
+            let dim = ui.ctx().animate_bool_with_time(ui.id().with("idle-dim"), next.mode == Mode::Dim, 0.20);
+            if next.mode.timed() {
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(6.0);
+                ui.scope(|ui| {
+                    ui.add_space(8.0 * (1.0 - timed));
+                    ui.multiply_opacity(0.58 + 0.42 * timed);
+                    slider(ui, "Idle minutes", &mut next.minutes, 120, tr(ui, " min").as_ref());
+                    if next.mode == Mode::Dim {
+                        ui.add_space(9.0);
+                        ui.scope(|ui| {
+                            ui.add_space(8.0 * (1.0 - dim));
+                            ui.multiply_opacity(0.58 + 0.42 * dim);
+                            slider(ui, "Dimmed brightness", &mut next.dim, 100, "%");
+                        });
+                    }
+                    ui.add_space(3.0);
+                    ui.label(egui::RichText::new(tr(ui, "Touch the screen to wake it.")).color(crate::ui::MUTED));
+                });
             }
         });
-        if self.draft.mode.timed() {
-            ui.add(egui::Slider::new(&mut self.draft.minutes, 1..=120).text(tr(ui, "Idle minutes")));
-            if self.draft.mode == Mode::Dim {
-                ui.add(egui::Slider::new(&mut self.draft.dim, 1..=100).suffix("%").text(tr(ui, "Dimmed brightness")));
-            }
-            ui.label(tr(ui, "Touch the screen to wake it."));
-        }
-        if ui.add_enabled_ui(self.draft != self.applied, |ui| crate::ui::button(ui, "Apply display settings", true)).inner.clicked() {
-            self.apply();
-            if self.error.is_none() && serde_json::to_string(&self.applied).ok()
-                .is_none_or(|value| save_preference(FILE, &value).is_err()) {
-                self.error = Some("Could not save display settings.");
-            }
+        if next != self.applied && self.apply(next) {
+            if dragging && !released {
+                // Brightness changes as the thumb moves. Avoid syncing the preference on each frame.
+                self.save_at = Some(Instant::now() + Duration::from_millis(250));
+            } else { self.save(); }
             ui.ctx().request_repaint();
+        } else if released && self.save_at.is_some() {
+            self.save();
         }
         if let Some(error) = self.error { ui.colored_label(crate::ui::WARNING, tr(ui, error)); }
     }
@@ -252,6 +290,10 @@ impl Display {
     pub(crate) fn keep_awake(&mut self) { self.last_input = Instant::now(); }
 
     pub(crate) fn tick(&mut self, ctx: &egui::Context) {
+        if let Some(at) = self.save_at {
+            let remaining = at.saturating_duration_since(Instant::now());
+            if remaining.is_zero() { self.save(); } else { ctx.request_repaint_after(remaining); }
+        }
         if self.asleep || !self.applied.mode.timed() { return; }
         let remaining = self.applied.timeout().saturating_sub(self.last_input.elapsed());
         if !remaining.is_zero() { ctx.request_repaint_after(remaining); return; }
@@ -262,6 +304,67 @@ impl Display {
             Err(_) => { self.error = Some("Could not set the display brightness."); self.last_input = Instant::now(); }
         }
     }
+}
+
+impl Drop for Display {
+    fn drop(&mut self) {
+        if self.save_at.is_some() { self.save(); }
+    }
+}
+
+fn display_card(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
+    let width = ui.available_width().min(790.0);
+    egui::Frame::new().fill(theme::card(ui)).stroke(egui::Stroke::new(1.0, theme::line(ui)))
+        .corner_radius(14).inner_margin(14).show(ui, |ui| {
+            ui.set_width((width - 30.0).max(0.0));
+            content(ui);
+        });
+}
+
+fn mode_button(ui: &mut Ui, mode: Mode, selected: bool) -> egui::Response {
+    let accent = theme::accent(ui);
+    let phase = ui.ctx().animate_bool_with_time(ui.id().with(mode.label()), selected, 0.20);
+    let text = egui::RichText::new(tr(ui, mode.label())).size(17.0).strong()
+        .color(egui::Color32::WHITE.lerp_to_gamma(accent, phase));
+    let control = egui::Button::selectable(selected, text).min_size(egui::vec2(104.0, 54.0))
+        .corner_radius(10)
+        .fill(theme::raised(ui).lerp_to_gamma(accent, phase * 0.16))
+        .stroke(egui::Stroke::new(1.0 + 0.5 * phase, theme::line(ui).lerp_to_gamma(accent, phase)));
+    ui.add(control)
+}
+
+fn touch_slider(ui: &mut Ui, label: &str, value: &mut u8, max: u8, unit: &str) -> egui::Response {
+    let width = ui.available_width().min(620.0);
+    let accent = theme::accent(ui);
+    ui.push_id(label, |ui| {
+        let caption = ui.horizontal(|ui| {
+            let caption = ui.label(egui::RichText::new(tr(ui, label)).size(19.0).strong());
+            egui::Frame::new().fill(theme::raised(ui)).corner_radius(8).inner_margin(egui::Margin::symmetric(9, 3))
+                .show(ui, |ui| ui.label(egui::RichText::new(format!("{value}{unit}")).size(22.0).strong().color(accent)));
+            caption.id
+        }).inner;
+        ui.add_space(3.0);
+        ui.horizontal(|ui| {
+            let step = egui::vec2(54.0, 54.0);
+            let step_button = |ui: &mut Ui, symbol| {
+                ui.add_sized(step, egui::Button::new(egui::RichText::new(symbol).size(24.0)).corner_radius(10))
+            };
+            if step_button(ui, "−").clicked() { *value = value.saturating_sub(1).max(1); }
+            let response = ui.scope(|ui| {
+                let spacing = ui.spacing_mut();
+                spacing.interact_size.y = 54.0;
+                spacing.slider_width = (width - 2.0 * (step.x + spacing.item_spacing.x)).max(1.0);
+                let visuals = ui.visuals_mut();
+                visuals.widgets.inactive.fg_stroke.color = accent;
+                visuals.widgets.hovered.fg_stroke.color = accent;
+                visuals.widgets.active.fg_stroke.color = accent;
+                ui.add(egui::Slider::new(value, 1..=max).show_value(false)
+                    .trailing_fill(true).smart_aim(false).step_by(1.0)).labelled_by(caption)
+            }).inner;
+            if step_button(ui, "+").clicked() { *value = value.saturating_add(1).min(max); }
+            response
+        }).inner
+    }).inner
 }
 
 #[cfg(test)]
@@ -281,12 +384,11 @@ mod tests {
         fs::write(dir.join("brightness"), "25").unwrap();
         let mut display = Display {
             x11: false, panel: Backlight::open(&dir), x11_timers: None, applied: Preference::default(),
-            draft: Preference::default(), last_input: Instant::now(), asleep: false, wake_until: None, error: None,
+            save_at: None, last_input: Instant::now(), asleep: false, wake_until: None, error: None,
         };
         let ctx = egui::Context::default();
         for (mode, expected) in [(Mode::Dim, 6), (Mode::Off, 0)] {
-            display.draft.mode = mode;
-            display.apply();
+            assert!(display.apply(Preference { mode, ..display.applied }));
             display.last_input -= display.applied.timeout();
             display.tick(&ctx);
             assert_eq!(number(&dir.join("brightness")), Some(expected));
@@ -295,8 +397,7 @@ mod tests {
             assert!(raw.events.is_empty(), "the wake gesture must not reach playback controls");
             assert_eq!(number(&dir.join("brightness")), Some(25));
         }
-        display.draft.brightness = Some(50);
-        display.apply();
+        assert!(display.apply(Preference { brightness: Some(50), ..display.applied }));
         assert_eq!(number(&dir.join("brightness")), Some(16));
         drop(display);
         assert_eq!(number(&dir.join("brightness")), Some(25));
