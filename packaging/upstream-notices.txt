@@ -791,7 +791,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-=== symphonia / symphonia-bundle-flac / symphonia-core / symphonia-metadata / symphonia-utils-xiph 0.5.5 (MPL-2.0 source at https://github.com/pdeljanov/Symphonia/tree/6d533f26150953a882a6a111ebd13f0abf7129d5) ===
+=== symphonia / symphonia-bundle-flac / symphonia-bundle-mp3 / symphonia-core / symphonia-metadata / symphonia-utils-xiph 0.5.5 (MPL-2.0 source at https://github.com/pdeljanov/Symphonia/tree/6d533f26150953a882a6a111ebd13f0abf7129d5) ===
 https://raw.githubusercontent.com/pdeljanov/Symphonia/6d533f26150953a882a6a111ebd13f0abf7129d5/LICENSE
 
 Mozilla Public License Version 2.0

@@ -12,7 +12,7 @@ Use Jasp on the Raspberry Pi desktop or run it as a fullscreen touchscreen kiosk
 
 - **Now Playing:** touch to seek or tap the cover for track details. Shuffle and repeat are built in, and the signal path shows decoding through to USB output.
 - **Library and queue:** browse albums and folders, play them now or queue them for later, reorder or clear the queue, and scan for library changes.
-- **USB audio:** Play original mono or stereo FLAC from jastreamer through a Pi-connected USB DAC without software mixing or resampling. Jasp asks before switching a shared USB DAC between jastreamer and moOde.
+- **USB audio:** Play original mono or stereo FLAC from jastreamer through a Pi-connected USB DAC without software mixing or resampling. Builds from the current source also decode MP3 locally and label it as a lossy source. Jasp asks before switching a shared USB DAC between jastreamer and moOde.
 - **Display:** choose English or Korean, set a theme for each player, and enter text with the on-screen keyboard.
 
 **Bit-perfect labels** describe the playback path Jasp can verify in software, not a measurement at the DAC.

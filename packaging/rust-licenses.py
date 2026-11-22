@@ -15,7 +15,7 @@ PINNED = {
     ('gl_generator', '0.14.0'), ('khronos_api', '3.1.0'),
     ('hexf-parse', '0.2.1'), ('profiling', '1.0.18'),
     *((name, '0.5.5') for name in (
-        'symphonia', 'symphonia-bundle-flac', 'symphonia-core',
+        'symphonia', 'symphonia-bundle-flac', 'symphonia-bundle-mp3', 'symphonia-core',
         'symphonia-metadata', 'symphonia-utils-xiph',
     )),
 }

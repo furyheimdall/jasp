@@ -101,7 +101,7 @@ pub enum Event {
     CatalogChanged(String), TrackLiked(String, bool), CatalogMutationFailed(String),
     LibraryAdmin(Result<LibraryUpdate, String>),
     Art(String, egui::ColorImage), Devices(Vec<String>),
-    Local(Option<(String, String)>), Format(String), Error(String),
+    Local(Option<(String, String)>), Format(Option<dac::OutputFormat>), Error(String),
     UsbPrepared { request: u64, result: Result<(), String> },
     UsbCommitted { request: u64, result: Result<(), String> },
     UsbReleased { request: u64, result: Result<(), String> },
@@ -590,7 +590,7 @@ impl Api {
         ensure!(self.output.is_none(), "release the current USB output first");
         let output = dac::Output::start(device.clone())?;
         let response: Registration = json_response(self.send(Method::POST, REGISTER,
-            Some(json!({"name":"Pi USB DAC · Native", "protocol_info":["audio/flac", "audio/x-flac"]})), None)?)?;
+            Some(json!({"name":"Pi USB DAC · Native", "protocol_info":dac::SourceCodec::MIME_TYPES})), None)?)?;
         let id = response.registration_id.strip_prefix("browser:").context("invalid output registration ID")?;
         ensure!(!id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
             && response.device.id == response.registration_id, "invalid output registration ID");
@@ -602,7 +602,7 @@ impl Api {
         self.output = Some(Local { output, token, path: format!("{REGISTER}/browser%3A{id}"), renderer: renderer.clone(),
             device: device.clone(),
             deadline, sequence: 0, play_id: String::new(), duration: 0, last_observation: Instant::now(), ended: false,
-            format: String::new() });
+            format: None });
         emit(Event::Local(Some((renderer, device))));
         Ok(())
     }
@@ -612,7 +612,7 @@ impl Api {
             let Local { output, path, token, .. } = local;
             drop(output);
             emit(Event::Local(None));
-            emit(Event::Format(String::new()));
+            emit(Event::Format(None));
             if let Err(error) = self.send(Method::DELETE, &path, None, Some(&token)).and_then(|response| {
                 if response.status().is_success() || response.status() == 404 { Ok(()) }
                 else { json_response::<Value>(response).map(|_| ()) }
@@ -638,7 +638,7 @@ impl Api {
             // A rejected or timed-out command must not keep audio alive.
             local.output.perform(dac::Action::Stop)?;
             local.play_id.clear();
-            local.set_format(String::new(), emit);
+            local.set_format(None, emit);
         }
         if let Some(command) = response.command.filter(|c| c.sequence > local.sequence && c.sequence > response.cancel_before_sequence) {
             let sequence = command.sequence;
@@ -647,7 +647,7 @@ impl Api {
                 Err(error) => {
                     let _ = local.output.perform(dac::Action::Stop);
                     local.play_id.clear();
-                    local.set_format(String::new(), emit);
+                    local.set_format(None, emit);
                     emit(Event::Error(format!("USB DAC: {error:#}")));
                     json!({"sequence":sequence,"result":"failed","error_code":"action_failed"})
                 }
@@ -660,12 +660,12 @@ impl Api {
             let observation = match local.output.perform(dac::Action::Status) {
                 Ok(status) => {
                     local.ended = status.ended;
-                    local.set_format(status.format.clone(), emit);
+                    local.set_format(status.format, emit);
                     local.observation(if status.ended { "ended" } else { "timeupdate" }, &status)
                 }
                 Err(error) => {
                     local.ended = true;
-                    local.set_format(String::new(), emit);
+                    local.set_format(None, emit);
                     emit(Event::Error(format!("USB DAC: {error:#}")));
                     local.observation("error", &dac::Status::default())
                 }
@@ -685,9 +685,9 @@ impl Api {
         let (action, event) = match command.action.as_str() {
             "set_uri" => {
                 let resource = command.resource.context("missing media resource")?;
-                ensure!(resource.transformed == Some(false) && resource.seekable && resource.size > 0
-                    && matches!(resource.mime.split(';').next(), Some("audio/flac" | "audio/x-flac" | "application/flac")),
-                    "direct output requires an original, seekable FLAC; transcoded and other formats are not sent to the DAC");
+                ensure!(resource.transformed == Some(false) && resource.seekable && resource.size > 0,
+                    "USB direct output requires an original, seekable stream");
+                let codec = dac::SourceCodec::from_mime(&resource.mime).context("unsupported USB audio format")?;
                 ensure!(!command.play_id.is_empty(), "missing playback ID");
                 let url = self.base.join(&resource.url).context("invalid media grant")?;
                 ensure!(url.origin() == self.base.origin() && url.username().is_empty() && url.password().is_none()
@@ -696,7 +696,7 @@ impl Api {
                     "untrusted media grant");
                 local.play_id = command.play_id;
                 local.duration = resource.duration_ms;
-                (dac::Action::Load(dac::Media { url, size: resource.size,
+                (dac::Action::Load(dac::Media { url, size: resource.size, codec,
                     cookie: self.cookie.clone().context("missing authenticated media session")? }), "loaded")
             }
             action => {
@@ -711,7 +711,7 @@ impl Api {
         let status = local.output.perform(action)?;
         local.ended = false;
         local.last_observation = Instant::now();
-        local.set_format(status.format.clone(), emit);
+        local.set_format(status.format, emit);
         let observation = local.observation(event, &status);
         if event == "stopped" { local.play_id.clear(); }
         Ok(observation)
@@ -721,11 +721,11 @@ impl Api {
 struct Local {
     output: dac::Output, path: String, token: HeaderValue, deadline: Instant, sequence: u64, renderer: String,
     device: String,
-    play_id: String, duration: u64, last_observation: Instant, ended: bool, format: String,
+    play_id: String, duration: u64, last_observation: Instant, ended: bool, format: Option<dac::OutputFormat>,
 }
 impl Local {
-    fn set_format(&mut self, format: String, emit: &impl Fn(Event)) {
-        if self.format != format { self.format = format.clone(); emit(Event::Format(format)); }
+    fn set_format(&mut self, format: Option<dac::OutputFormat>, emit: &impl Fn(Event)) {
+        if self.format != format { self.format = format; emit(Event::Format(format)); }
     }
     fn observation(&self, event: &str, status: &dac::Status) -> Value {
         json!({"event":event,"play_id":self.play_id,"has_position":event != "error", "position_ms":status.ms,

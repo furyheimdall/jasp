@@ -1,5 +1,6 @@
 use crate::{
     chrome::{self, Controls, Motion, Song, Transport},
+    dac::{OutputFormat, SourceCodec},
     ja::{self, Action, Event, UsbPlay, Worker},
     ja_library::Library,
     ja_library_admin_ui::AdminView,
@@ -139,6 +140,42 @@ pub(crate) enum UsbNotice {
     Released(u64, Result<(), String>),
 }
 
+struct UsbSignal {
+    codec: SourceCodec,
+    source: String,
+    pcm: String,
+}
+
+impl From<OutputFormat> for UsbSignal {
+    fn from(format: OutputFormat) -> Self {
+        let OutputFormat { codec, rate, channels, source_bits, pcm } = format;
+        let source = match source_bits {
+            Some(bits) => format!("{rate} Hz · {bits}-bit FLAC"),
+            None => format!("{rate} Hz · MP3"),
+        };
+        Self { codec, source, pcm: format!("{pcm:?} · {channels} ch") }
+    }
+}
+
+impl UsbSignal {
+    fn path<'a>(&'a self, device: &'a str) -> chrome::SignalPath<'a> {
+        use chrome::SignalQuality::{Lossy, Preserved};
+        let (decoder, source_quality, note) = match self.codec {
+            SourceCodec::Flac => ("Symphonia · FLAC", Preserved,
+                "Bit-perfect to ALSA · No resampling, channel remix or DSP"),
+            SourceCodec::Mp3 => ("Symphonia · MP3", Lossy,
+                "Lossy MP3 source · No resampling or channel remix"),
+        };
+        let device = device.strip_prefix("hw:CARD=").and_then(|value| value.split_once(",DEV="))
+            .map_or(device, |(name, _)| name);
+        chrome::SignalPath {
+            stages: [("jastreamer", &self.source, source_quality), ("Decoding", decoder, source_quality),
+                ("PCM", &self.pcm, Preserved), (device, "ALSA hw · USB DAC", Preserved)],
+            note, flowing: true,
+        }
+    }
+}
+
 pub struct View {
     worker: Worker,
     page: Page,
@@ -165,7 +202,7 @@ pub struct View {
     usb_play: Option<UsbPlay>,
     usb_notice: Option<UsbNotice>,
     moode_may_hold_usb: bool,
-    format: String,
+    format: Option<UsbSignal>,
     error: Option<String>,
     cover: Option<(String, TextureHandle)>,
     transport: Transport,
@@ -190,7 +227,7 @@ impl View {
             library_admin: AdminView::default(),
             player_received: Instant::now(), entrance: chrome::Entrance::default(),
             renderers: Vec::new(), devices: Vec::new(), local: None,
-            local_pending: false, format: String::new(), error: None, cover: None, transport: Transport::default(),
+            local_pending: false, format: None, error: None, cover: None, transport: Transport::default(),
             usb_play: None, usb_notice: None,
             moode_may_hold_usb: false,
             queue_clear: None,
@@ -298,7 +335,7 @@ impl View {
                 Event::UsbCommitted { request, result } => self.usb_notice = Some(UsbNotice::Committed(request, result)),
                 Event::UsbReleased { request, result } => self.usb_notice = Some(UsbNotice::Released(request, result)),
                 Event::Local(local) => { self.local = local; self.local_pending = false; }
-                Event::Format(format) => self.format = format,
+                Event::Format(format) => self.format = format.map(UsbSignal::from),
                 Event::Error(error) => { self.error = Some(error); }
                 Event::LibraryAdmin(result) => {
                     if self.library_admin.loaded(result, activity) { self.library.reload(); }
@@ -411,7 +448,7 @@ impl View {
 
     fn login_form(&mut self, ui: &mut Ui, reveal_active: bool) {
         ui.label(RichText::new("jastreamer Server").size(30.0).strong());
-        ui.label(RichText::new(tr(ui, "Control the server queue or play original FLAC on a local USB DAC.")).color(MUTED));
+        ui.label(RichText::new(tr(ui, "Control the server queue or play music on a local USB DAC.")).color(MUTED));
         ui.add_space(14.0);
         let width = ui.available_width().min(470.0);
         let server = login_field(ui, Field::Server, width, &mut self.url, &mut self.keyboard.target);
@@ -499,19 +536,7 @@ impl View {
         let output = if self.using_usb() { "Pi USB DAC · Direct" } else { "" };
         let song = Self::song(state, self.cover.as_ref().map(|(_, texture)| texture));
         let path = if self.using_usb() {
-            self.format.split_once(" → ").and_then(|(source, pcm)| {
-                let (pcm, _) = pcm.split_once(" · ALSA hw")?;
-                let device = self.usb_device()?;
-                let device = device.strip_prefix("hw:CARD=").and_then(|value| value.split_once(",DEV="))
-                    .map_or(device, |(name, _)| name);
-                use chrome::SignalQuality::Preserved;
-                Some(chrome::SignalPath {
-                    stages: [("jastreamer", source, Preserved), ("Decoding", "Symphonia · FLAC", Preserved),
-                        ("PCM", pcm, Preserved), (device, "ALSA hw · USB DAC", Preserved)],
-                    note: "Bit-perfect to ALSA · No resampling, channel remix or DSP",
-                    flowing: true,
-                })
-            })
+            self.format.as_ref().zip(self.usb_device()).map(|(format, device)| format.path(device))
         } else { None };
         let track = state.track.as_ref().filter(|track| !track.id.is_empty());
         if chrome::now_playing(ui, &song, label, output, &state.pending_command, path, track.is_some())
@@ -609,7 +634,7 @@ impl View {
         let active = player.map_or("", |s| s.renderer_id.as_str());
         let allowed = self.signed_in && self.enabled() && !moode_playing;
         ui.label(RichText::new(tr(ui, "USB devices")).size(22.0).strong());
-        ui.label(RichText::new(tr(ui, "Local USB audio  ·  jastreamer plays original FLAC directly, without a mixer.")).color(MUTED));
+        ui.label(RichText::new(tr(ui, "Local USB audio · Direct output without a software mixer.")).color(MUTED));
         if self.devices.is_empty() {
             ui.label(RichText::new(tr(ui, "No USB playback device detected.")).color(MUTED));
         }

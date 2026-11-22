@@ -174,6 +174,7 @@ impl Api {
 
 pub(super) fn check_usb_track(track: &Track) -> Result<()> {
     ensure!(track.available, "the selected track is unavailable");
-    ensure!(track.format.eq_ignore_ascii_case("flac"), "the Pi USB DAC requires original FLAC playback");
+    ensure!(crate::dac::SourceCodec::from_track_format(&track.format).is_some(),
+        "the Pi USB DAC cannot decode this format: {}", track.format);
     Ok(())
 }

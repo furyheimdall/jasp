@@ -3,10 +3,11 @@ use anyhow::{Context, Result, anyhow, ensure};
 use reqwest::{Url, blocking::Client, header::{CONTENT_RANGE, HeaderValue, RANGE}};
 use std::{io::{self, Read, Seek, SeekFrom}, path::Path, sync::{Arc, Mutex, mpsc::{self, Receiver, SyncSender}}, thread, time::{Duration, Instant}};
 use symphonia::core::{
-    audio::{AudioBufferRef, Signal}, codecs::{CODEC_TYPE_FLAC, Decoder, DecoderOptions},
+    audio::{AudioBuffer, AudioBufferRef, Signal}, codecs::{CODEC_TYPE_FLAC, CODEC_TYPE_MP3, Decoder, DecoderOptions},
     errors::Error as DecodeError, formats::{FormatOptions, FormatReader, SeekMode, SeekTo},
     io::{MediaSource, MediaSourceStream}, meta::MetadataOptions, probe::Hint,
 };
+use symphonia::core::{conv::FromSample, sample::Sample};
 
 pub(crate) mod ownership;
 mod mpd_route;
@@ -35,10 +36,41 @@ fn scan_devices() -> Result<Vec<String>> {
     Ok(devices)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceCodec { Flac, Mp3 }
+
+impl SourceCodec {
+    pub const MIME_TYPES: [&str; 4] = ["audio/flac", "audio/x-flac", "audio/mpeg", "audio/mp3"];
+
+    pub fn from_mime(mime: &str) -> Option<Self> {
+        match mime.split(';').next()?.trim() {
+            "audio/flac" | "audio/x-flac" | "application/flac" => Some(Self::Flac),
+            "audio/mpeg" | "audio/mp3" => Some(Self::Mp3),
+            _ => None,
+        }
+    }
+
+    pub fn from_track_format(format: &str) -> Option<Self> {
+        if format.eq_ignore_ascii_case("flac") { Some(Self::Flac) }
+        else if format.eq_ignore_ascii_case("mp3") { Some(Self::Mp3) }
+        else { None }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutputFormat {
+    pub codec: SourceCodec,
+    pub rate: u32,
+    pub channels: usize,
+    pub source_bits: Option<u32>,
+    pub pcm: Format,
+}
+
 pub struct Media {
     pub url: Url,
     pub cookie: HeaderValue,
     pub size: u64,
+    pub codec: SourceCodec,
 }
 
 struct RangeSource {
@@ -99,7 +131,7 @@ pub struct Status {
     pub active: bool,
     pub ended: bool,
     pub ms: u64,
-    pub format: String,
+    pub format: Option<OutputFormat>,
 }
 
 pub enum Action { Load(Media), Play, Pause, Seek(u64), Stop, Status }
@@ -161,7 +193,7 @@ fn run(device: &str, rx: Receiver<Request>, deadline: &Mutex<Instant>) {
                 }
                 Action::Stop => { stream = None; failure = None; Ok(()) }
                 Action::Status => failure.take().map_or(Ok(()), Err),
-                rest => stream.as_mut().context("no FLAC has been loaded").and_then(|s| {
+                rest => stream.as_mut().context("no audio stream has been loaded").and_then(|s| {
                     check_lease(deadline)?;
                     match rest {
                         Action::Play => s.play(device, deadline),
@@ -199,7 +231,8 @@ struct Stream {
     pcm: Option<(PCM, Format)>,
     rate: u32,
     channels: usize,
-    bits: u32,
+    codec: SourceCodec,
+    source_bits: Option<u32>,
     track: u32,
     active: bool,
     ended: bool,
@@ -233,25 +266,39 @@ fn drain_pcm(tail: &mut Tail, start: impl FnOnce() -> alsa::Result<()>, state: i
 
 impl Stream {
     fn load(media: Media) -> Result<Self> {
+        let codec = media.codec;
         let source = RangeSource { media, http: Client::builder().no_proxy()
             .redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(2)).build()?,
             pos: 0, start: 0, buffer: Vec::new() };
+        Self::open(codec, Box::new(source))
+    }
+
+    fn open(codec: SourceCodec, source: Box<dyn MediaSource>) -> Result<Self> {
         let mut hint = Hint::new();
-        hint.with_extension("flac");
-        let reader = symphonia::default::get_probe().format(&hint, MediaSourceStream::new(Box::new(source), Default::default()),
-            &FormatOptions::default(), &MetadataOptions::default())?.format;
-        let track = reader.default_track().context("missing FLAC stream")?;
+        let (extension, decoder_type) = match codec {
+            SourceCodec::Flac => ("flac", CODEC_TYPE_FLAC),
+            SourceCodec::Mp3 => ("mp3", CODEC_TYPE_MP3),
+        };
+        hint.with_extension(extension);
+        let reader = symphonia::default::get_probe().format(&hint, MediaSourceStream::new(source, Default::default()),
+            &FormatOptions { enable_gapless: codec == SourceCodec::Mp3, ..FormatOptions::default() },
+            &MetadataOptions::default())?.format;
+        let track = reader.default_track().context("missing audio stream")?;
         let params = &track.codec_params;
-        ensure!(params.codec == CODEC_TYPE_FLAC, "not an original FLAC audio stream");
-        let total_frames = params.n_frames;
-        let rate = params.sample_rate.filter(|n| *n > 0).context("missing FLAC sample rate")?;
-        let bits = params.bits_per_sample.context("missing FLAC bit depth")?;
-        ensure!((4..=32).contains(&bits), "unsupported FLAC bit depth");
-        let channels = params.channels.context("missing FLAC channel count")?.count();
-        ensure!(channels == 1 || channels == 2, "only mono and stereo FLAC are supported for direct USB output");
+        ensure!(params.codec == decoder_type, "audio stream does not match the advertised format");
+        // MP3 frame counts can be estimated rather than declared in the source.
+        let total_frames = if codec == SourceCodec::Flac { params.n_frames } else { None };
+        let rate = params.sample_rate.filter(|n| *n > 0).context("missing audio sample rate")?;
+        let source_bits = if codec == SourceCodec::Flac {
+            let bits = params.bits_per_sample.context("missing FLAC bit depth")?;
+            ensure!((4..=32).contains(&bits), "unsupported FLAC bit depth");
+            Some(bits)
+        } else { None };
+        let channels = params.channels.context("missing audio channel count")?.count();
+        ensure!(channels == 1 || channels == 2, "USB direct output supports mono and stereo");
         let id = track.id;
         let decoder = symphonia::default::get_codecs().make(params, &DecoderOptions::default())?;
-        Ok(Self { reader, decoder, pcm: None, rate, channels, bits, track: id, active: false,
+        Ok(Self { reader, decoder, pcm: None, rate, channels, codec, source_bits, track: id, active: false,
             ended: false, tail: Tail::Reading, total_frames, frame: 0, discard_before: 0, samples: Vec::new(), offset: 0 })
     }
 
@@ -265,9 +312,14 @@ impl Stream {
             hw.set_rate_resample(false)?;
             hw.set_channels(self.channels as u32).context("DAC does not support the exact source channel count")?;
             hw.set_rate(self.rate, ValueOr::Nearest).context("DAC does not support the source sample rate")?;
-            let choices = [Format::S16LE, Format::S243LE, Format::S24LE, Format::S32LE];
-            let format = choices.into_iter().find(|&format| width(format) >= self.bits && hw.test_format(format).is_ok())
-                .context("DAC cannot preserve the source bit depth")?;
+            let choices = if self.source_bits.is_some() {
+                [Format::S16LE, Format::S243LE, Format::S24LE, Format::S32LE]
+            } else {
+                [Format::S32LE, Format::S243LE, Format::S24LE, Format::S16LE]
+            };
+            let format = choices.into_iter().find(|&format| self.source_bits.is_none_or(|bits| width(format) >= bits)
+                && hw.test_format(format).is_ok())
+                .context("DAC does not support a compatible PCM format")?;
             hw.set_format(format)?;
             hw.set_buffer_time_near(200_000, ValueOr::Nearest)?;
             hw.set_period_time_near(20_000, ValueOr::Nearest)?;
@@ -344,8 +396,8 @@ impl Stream {
     fn status(&self) -> Status {
         Status { active: self.active, ended: self.ended,
             ms: self.position().saturating_mul(1000) / u64::from(self.rate),
-            format: self.pcm.as_ref().map_or_else(String::new, |(_, f)| format!(
-                "{} Hz · {}-bit FLAC → {f:?} · {} ch · ALSA hw (no DSP)", self.rate, self.bits, self.channels)), }
+            format: self.pcm.as_ref().map(|(_, pcm)| OutputFormat { codec: self.codec, rate: self.rate,
+                channels: self.channels, source_bits: self.source_bits, pcm: *pcm }), }
     }
 
     fn decode_chunk(&mut self, format: Format) -> Result<()> {
@@ -362,12 +414,13 @@ impl Stream {
         let skip = self.discard_before.saturating_sub(packet.ts()) as usize;
         let audio = self.decoder.decode(&packet)?;
         ensure!(audio.spec().rate == self.rate && audio.spec().channels.count() == self.channels,
-            "FLAC format changed midstream");
-        let AudioBufferRef::S32(decoded) = audio else { return Err(anyhow!("unexpected FLAC decoder sample format")); };
-        for index in skip..decoded.frames() {
-            for channel in 0..self.channels {
-                append_sample(&mut self.samples, decoded.chan(channel)[index], format);
-            }
+            "audio format changed midstream");
+        match audio {
+            AudioBufferRef::S32(decoded) if self.codec == SourceCodec::Flac =>
+                interleave(&mut self.samples, &decoded, skip, self.channels, format, |sample| sample),
+            AudioBufferRef::F32(decoded) if self.codec == SourceCodec::Mp3 =>
+                interleave(&mut self.samples, &decoded, skip, self.channels, format, i32::from_sample),
+            _ => return Err(anyhow!("unexpected decoder sample format")),
         }
         Ok(())
     }
@@ -397,6 +450,15 @@ impl Stream {
             }
         }
         Ok(())
+    }
+}
+
+fn interleave<S: Sample>(out: &mut Vec<u8>, audio: &AudioBuffer<S>, skip: usize, channels: usize,
+    format: Format, to_sample: impl Fn(S) -> i32) {
+    for frame in skip..audio.frames() {
+        for channel in 0..channels {
+            append_sample(out, to_sample(audio.chan(channel)[frame]), format);
+        }
     }
 }
 
@@ -437,5 +499,32 @@ mod tests {
             append_sample(&mut bytes, sample, format);
             assert_eq!(bytes, expected);
         }
+    }
+
+    #[test]
+    fn decodes_original_stereo_mp3_and_flac_after_seeking() {
+        use std::io::Cursor;
+
+        let mp3 = include_bytes!("../tests/fixtures/stereo.mp3").as_slice();
+        let flac = include_bytes!("../tests/fixtures/stereo.flac").as_slice();
+        for (source, codec, source_bits, output) in [
+            (mp3, SourceCodec::Mp3, None, Format::S32LE),
+            (flac, SourceCodec::Flac, Some(16), Format::S16LE),
+        ] {
+            let mut stream = Stream::open(codec, Box::new(Cursor::new(source))).unwrap();
+            assert_eq!((stream.rate, stream.channels, stream.source_bits), (44_100, 2, source_bits));
+            stream.seek(150).unwrap();
+            let mut bytes = 0;
+            let mut audible = false;
+            while stream.tail == Tail::Reading {
+                stream.decode_chunk(output).unwrap();
+                bytes += stream.samples.len();
+                audible |= stream.samples.iter().any(|&byte| byte != 0);
+            }
+            let bytes_per_frame = if source_bits.is_some() { 4 } else { 8 };
+            assert_eq!(bytes / bytes_per_frame, 8_820);
+            assert!(audible);
+        }
+        assert!(Stream::open(SourceCodec::Flac, Box::new(Cursor::new(mp3))).is_err());
     }
 }
