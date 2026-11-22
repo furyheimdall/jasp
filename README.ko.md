@@ -15,6 +15,7 @@ Raspberry Pi 데스크톱 앱이나 전체 화면 터치스크린 키오스크�
 - **USB 오디오:** 모노·스테레오 FLAC과 MP3를 Pi에서 디코딩하고, 소프트웨어 믹싱·리샘플링·채널 변환 없이 PCM을 USB DAC으로 직접 보냅니다. jastreamer와 moOde가 같은 USB DAC을 사용할 때는 전환 전에 확인을 요청합니다.
 - **터치 설정:** 설정 왼쪽 메뉴에서 항목을 바로 이동할 수 있습니다. **일반**에서는 한국어·영어를 선택하고, 플레이어별 색상 칸을 눌러 테마를 바꿉니다.
 - **jastreamer 라이브러리 설정:** Pi에서는 등록된 소스를 확인하고 검색을 실행할 수 있습니다. 소스 추가·수정·제거는 jastreamer 웹 UI에서 합니다.
+- **jastreamer 좋아요·재생목록:** 곡에 좋아요를 표시하고 서버 재생 횟수를 확인할 수 있습니다. 좋아요 곡을 섞어 대기열에 담아도 재생은 시작하지 않습니다. 저장된 재생목록은 **라이브러리 → 재생목록**에서 보고, 생성과 편집은 웹 UI에서 합니다.
 
 **비트 퍼펙트 표시**는 DAC 출력의 실측값이 아니라 앱에서 확인한 재생 경로를 기준으로 합니다.
 
@@ -41,8 +42,8 @@ Raspberry Pi 데스크톱 앱이나 전체 화면 터치스크린 키오스크�
 [릴리스](https://github.com/furyheimdall/jasp/releases)에서 ARM64 `.deb`와 SHA-256 체크섬을 내려받으세요. 패키지는 **64비트 Raspberry Pi OS 또는 Debian 13(Trixie)** 용입니다. Pi에서 다음 명령을 실행하세요.
 
 ```sh
-sha256sum -c jasp_0.1.6_arm64.deb.sha256
-sudo apt install ./jasp_0.1.6_arm64.deb
+sha256sum -c jasp_0.1.7_arm64.deb.sha256
+sudo apt install ./jasp_0.1.7_arm64.deb
 ```
 
 | 환경 | 첫 실행 | 자동 시작을 켰을 때 |

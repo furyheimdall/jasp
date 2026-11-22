@@ -381,7 +381,7 @@ impl Player {
             .or(snapshot.source.as_deref()).unwrap_or("moOde");
         let cover = self.cover.as_ref().or_else(|| self.artwork.cached(&snapshot.track.file));
         let path = self.audio_path.as_ref().filter(|_| self.disconnect.is_none()).map(MoodePath::display);
-        if chrome::now_playing(ui, &Self::song(snapshot, cover), state, output, "", path, !snapshot.track.file.is_empty()) {
+        if chrome::now_playing(ui, &Self::song(snapshot, cover), state, output, "", path, !snapshot.track.file.is_empty(), |_| {}) {
             let track = &snapshot.track;
             self.track_dialog = Some(TrackDialog::new("moOde", &track.title, &track.artist, &track.album,
                 if track.duration > 0.0 { track.duration } else { snapshot.duration }, snapshot.track_details.clone()));

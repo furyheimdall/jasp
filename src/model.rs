@@ -33,6 +33,7 @@ pub struct TrackDetails {
     pub bits_per_sample: Option<u32>,
     pub channels: Option<u32>,
     pub bit_rate: Option<u64>,
+    pub play_count: Option<u64>,
     pub path: String,
 }
 

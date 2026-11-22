@@ -100,6 +100,7 @@ fn metadata_rows(d: TrackDetails, artist: &str) -> Vec<(&'static str, String)> {
     if let Some(bits) = d.bits_per_sample { add("Bit depth", format!("{bits}-bit")); }
     if let Some(channels) = d.channels { add("Channels", channels.to_string()); }
     if let Some(bit_rate) = d.bit_rate { add("Bitrate", format!("{:.0} kb/s", bit_rate as f64 / 1000.0)); }
+    if let Some(count) = d.play_count { add("Play count", count.to_string()); }
     // Do not display stream URLs, which may include embedded credentials.
     if !d.path.contains("://") { add("Library path", d.path); }
     rows

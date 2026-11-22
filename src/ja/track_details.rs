@@ -25,6 +25,7 @@ struct CatalogTrack {
     genres: Option<Vec<String>>,
     disc: Option<u32>,
     track: Option<u32>,
+    play_count: Option<u64>,
     #[serde(default)] path: String,
 }
 
@@ -57,7 +58,7 @@ impl Info {
             disc: track.disc.filter(|n| *n > 0), number: track.track.filter(|n| *n > 0),
             codec, sample_rate: sample_rate.filter(|n| *n > 0),
             bits_per_sample: bits_per_sample.filter(|n| *n > 0), channels: channels.filter(|n| *n > 0),
-            bit_rate: bit_rate.filter(|n| *n > 0), path: track.path,
+            bit_rate: bit_rate.filter(|n| *n > 0), play_count: track.play_count, path: track.path,
         })
     }
 }

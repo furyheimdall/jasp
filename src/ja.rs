@@ -84,7 +84,7 @@ pub enum Action {
     Fallback { renderer: String, expected: String, revision: u64 },
     StopForUsb { expected: String },
     Queue, QueueEdit { revision: u64, entry: String, index: Option<usize> },
-    QueueClear { revision: u64 },
+    QueueClear { revision: u64 }, ShuffleLiked { revision: u64 },
     Browse(Browse), LibraryArt(String), CatalogQueue(QueuePlacement, QueueTarget), Like(String, bool),
     TrackDetails(String),
     LibraryAdmin(LibraryOp),
@@ -330,6 +330,13 @@ impl Worker {
                         mutation((|| {
                             ensure!(!read_only, "queue changes are disabled in read-only mode");
                             client.as_mut().context("connect to a jastreamer server first")?.clear_queue(revision, &emit)
+                        })());
+                        Ok(())
+                    }
+                    Action::ShuffleLiked { revision } => {
+                        mutation((|| {
+                            ensure!(!read_only, "queue changes are disabled in read-only mode");
+                            client.as_mut().context("connect to a jastreamer server first")?.shuffle_liked(revision, &emit)
                         })());
                         Ok(())
                     }

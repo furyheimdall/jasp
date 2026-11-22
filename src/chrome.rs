@@ -317,7 +317,7 @@ impl SignalQuality {
 }
 
 pub(crate) fn now_playing(ui: &mut Ui, song: &Song<'_>, state: &str, output: &str, pending: &str,
-    path: Option<SignalPath<'_>>, has_track: bool) -> bool {
+    path: Option<SignalPath<'_>>, has_track: bool, extra: impl FnOnce(&mut Ui)) -> bool {
     let wide = ui.available_width() >= 740.0;
     let cover_size = if wide {
         (ui.available_width() * 0.38).min(ui.clip_rect().height() - 28.0).clamp(140.0, 420.0)
@@ -328,6 +328,7 @@ pub(crate) fn now_playing(ui: &mut Ui, song: &Song<'_>, state: &str, output: &st
         ui.add(egui::Label::new(RichText::new(song.headline(ui)).size(36.0).strong()).wrap());
         if !song.artist.is_empty() { ui.label(RichText::new(song.artist).size(22.0)); }
         if !song.album.is_empty() { ui.label(RichText::new(song.album).size(18.0).color(MUTED)); }
+        extra(ui);
         ui.add_space(24.0);
         ui.separator();
         if let Some(path) = &path { signal_path(ui, path, state == "PLAYING"); }

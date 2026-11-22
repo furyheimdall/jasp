@@ -16,11 +16,12 @@ const PAGE_BUTTON: f32 = 65.0;
 const PAGE_RANGE: f32 = 126.0;
 const KEYBOARD_BUTTON: f32 = 94.0;
 const SEARCH_BUTTON: f32 = 68.0;
-const TABS: [(Collection, &str, f32); 7] = [
+const TABS: [(Collection, &str, f32); 8] = [
     (Collection::Albums, "Albums", 76.0), (Collection::Artists, "Artists", 76.0),
     (Collection::Genres, "Genres", 76.0), (Collection::Folders, "Folders", 78.0),
     (Collection::Tracks, "Tracks", 76.0), (Collection::MostPlayed, "Most played", 108.0),
     (Collection::Liked, "Liked", 64.0),
+    (Collection::Playlists, "Playlists", 90.0),
 ];
 
 #[derive(Clone)]
@@ -117,6 +118,7 @@ impl Library {
     }
 
     pub(crate) fn clear_pending(&mut self) { self.mutating = false; }
+    pub(crate) fn mutation_pending(&self) -> bool { self.mutating }
     pub(crate) fn set_queue_pending(&mut self) { self.mutating = true; self.notice = None; }
 
     pub(crate) fn liked(&mut self, id: &str, liked: bool) {
@@ -127,9 +129,19 @@ impl Library {
                     page.total = page.total.saturating_sub(1);
                     self.requested = false;
                 }
-            } else if let Some(track) = tracks.iter_mut().find(|t| t.id == id) { track.liked = liked; }
+            } else {
+                for track in tracks.iter_mut().filter(|track| track.id == id) { track.liked = liked; }
+            }
         }
         self.changed(Ok(if liked { "Added to Liked" } else { "Removed from Liked" }.to_owned()));
+    }
+
+    pub(crate) fn update_play_count(&mut self, current: &Track) {
+        if let Some(Ok(page)) = &mut self.result && let Rows::Tracks(tracks) = &mut page.items {
+            for track in tracks.iter_mut().filter(|track| track.id == current.id) {
+                track.play_count = current.play_count;
+            }
+        }
     }
 
     pub(crate) fn reload(&mut self) {
@@ -195,7 +207,8 @@ impl Library {
         let page = self.result.as_ref().and_then(|result| result.as_ref().ok());
         let offset = query.offset;
         let page_len = page.map_or(0, |p| match &p.items {
-            Rows::Albums(v) => v.len(), Rows::Names(v) => v.len(), Rows::Folders(v) => v.len(), Rows::Tracks(v) => v.len(),
+            Rows::Albums(v) => v.len(), Rows::Names(v) => v.len(), Rows::Folders(v) => v.len(),
+            Rows::Tracks(v) => v.len(), Rows::Playlists(v) => v.len(),
         });
         let total = page.map_or(0, |p| p.total);
         let active = can_edit && !self.mutating;
@@ -264,7 +277,7 @@ impl Library {
         }
         if let Some(message) = &self.notice {
             let (line, color) = match message { Ok(note) => (note, theme::accent(ui)), Err(error) => (error, WARNING) };
-            ui.label(RichText::new(line).size(13.0).color(color));
+            ui.label(RichText::new(tr(ui, line)).size(13.0).color(color));
         }
         if self.mutating { ui.label(RichText::new("Updating server…").size(13.0).color(MUTED)); }
         match &self.result {
@@ -277,8 +290,9 @@ impl Library {
                 if page_len == 0 && page.folders.is_empty() {
                     let message = if !query.query.is_empty() { "No results for this search." }
                         else if query.collection == Collection::Liked { "No liked tracks yet." }
+                        else if query.collection == Collection::Playlists && !scoped { "No saved playlists." }
                         else { "Nothing in this collection yet." };
-                    ui.label(RichText::new(message).color(MUTED));
+                    ui.label(RichText::new(tr(ui, message)).color(MUTED));
                 } else {
                     let entrance = self.entrance;
                     entrance.show(ui, |ui| {
@@ -338,6 +352,17 @@ impl Library {
                                 }
                             });
                         }
+                        Rows::Playlists(playlists) => {
+                            scroll.show_rows(ui, ROW_HEIGHT, playlists.len(), |ui, range| {
+                                for playlist in &playlists[range] {
+                                    let meta = count(playlist.track_ids.len());
+                                    if browse_row(ui, ui.available_width(), &playlist.name, &meta, false) {
+                                        nav = Some(Navigation::Scope(Scope::Playlist { id: playlist.id.clone() },
+                                            playlist.name.clone(), meta, String::new()));
+                                    }
+                                }
+                            });
+                        }
                         Rows::Tracks(tracks) => {
                             let folder_count = page.folders.len();
                             scroll.show_rows(ui, ROW_HEIGHT, folder_count + tracks.len(), |ui, range| {
@@ -354,7 +379,7 @@ impl Library {
                                             if track.disc > 1 { format!("{}–{}", track.disc, track.track) } else { track.track.to_string() }
                                         } else { (offset + index + 1).to_string() };
                                         let ranked = query.collection == Collection::MostPlayed;
-                                        let clicked = ui.push_id(&track.id, |ui| {
+                                        let clicked = ui.push_id((index, &track.id), |ui| {
                                             track_row(ui, track, &number, cover, active, can_play, ranked)
                                         }).inner;
                                         if clicked.is_some() { mutation = clicked; }
@@ -416,6 +441,14 @@ impl Library {
                 }
             });
         });
+        ui.add_space(5.0);
+        let shuffle = tool(ui, "Shuffle liked into queue", can_edit && queue.is_some())
+            .on_hover_text(tr(ui, "Append available liked tracks in random order without starting playback.")).clicked();
+        if shuffle && let Some(queue) = queue {
+            if send(Action::ShuffleLiked { revision: queue.revision }) { self.set_queue_pending(); }
+            else { self.changed(Err("Could not send the queue action.".into())); }
+            return None;
+        }
         ui.add_space(5.0);
         if let Some(player) = player && let Some(track) = player.track.as_ref() {
             let status = tr(ui, queue_status(&player.state));
@@ -483,11 +516,12 @@ impl Library {
                         painter.text(marker, Align2::CENTER_CENTER, (index + 1).to_string(), FontId::monospace(13.0), MUTED);
                     }
                     artwork(ui, Rect::from_min_size(rect.left_top() + vec2(41.0, 6.0), vec2(44.0, 44.0)), cover, false);
-                    let right = rect.right() - 189.0;
-                    let meta = if width >= 820.0 { rect.left() + width * 0.61 } else { right };
+                    let right = rect.right() - 235.0;
+                    let meta = if width >= 820.0 { rect.left() + (right - rect.left()) * 0.64 } else { right };
                     line(ui, rect.left_top() + vec2(94.0, 7.0), meta - rect.left() - 106.0, &entry.track.title, 17.0,
                         if is_current { theme::accent(ui) } else { TEXT });
-                    line(ui, rect.left_top() + vec2(94.0, 30.0), meta - rect.left() - 106.0, &entry.track.artist, 13.0, MUTED);
+                    let caption = track_caption(ui, &entry.track, false);
+                    line(ui, rect.left_top() + vec2(94.0, 30.0), meta - rect.left() - 106.0, &caption, 13.0, MUTED);
                     if width >= 820.0 {
                         line(ui, pos2(meta, rect.top() + 8.0), right - meta - 71.0, &entry.track.album, 14.0, TEXT);
                         if let Some(status) = status {
@@ -514,12 +548,14 @@ impl Library {
                             });
                         }
                     }
+                    let like = Rect::from_min_size(pos2(right + 184.0, rect.top() + 7.0), vec2(42.0, 42.0));
+                    if like_at(ui, like, &entry.track, can_edit) { action = Some(Action::Like(entry.track.id.clone(), !entry.track.liked)); }
                     painter.hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, theme::line(ui)));
                 });
             }
         });
         if let Some(action) = action {
-            let waits = matches!(action, Action::QueueEdit { .. });
+            let waits = matches!(action, Action::QueueEdit { .. } | Action::Like(..));
             if send(action) { self.notice = None; self.mutating = waits; }
             else { self.changed(Err("Could not send the queue action.".to_owned())); }
         }
@@ -649,6 +685,33 @@ fn browse_row(ui: &mut Ui, width: f32, name: &str, detail: &str, folder: bool) -
     response.on_hover_text(name).clicked()
 }
 
+pub(crate) fn play_count_text(ui: &Ui, count: u64) -> String {
+    if count == 1 { tr(ui, "1 play").into_owned() } else { format!("{count}{}", tr(ui, " plays")) }
+}
+
+fn track_caption(ui: &Ui, track: &Track, album: bool) -> String {
+    let mut caption = present(&track.artist, "Unknown artist").to_owned();
+    if album && !track.album.is_empty() { caption.push_str(" · "); caption.push_str(&track.album); }
+    caption.push_str(" · ");
+    caption.push_str(&play_count_text(ui, track.play_count));
+    caption
+}
+
+pub(crate) fn like_button(track: &Track) -> egui::Button<'static> {
+    let icon = if track.liked { "♥" } else { "♡" };
+    let tint = if track.liked { theme::ON_ACCENT } else { MUTED };
+    crate::ui::centered_button(RichText::new(icon).size(19.0).color(tint)).selected(track.liked).corner_radius(8)
+}
+
+pub(crate) fn like_label(track: &Track) -> &'static str {
+    if track.liked { "Remove like" } else { "Like track" }
+}
+
+fn like_at(ui: &mut Ui, rect: Rect, track: &Track, enabled: bool) -> bool {
+    ui.put(rect, like_button(track).sense(if enabled { Sense::click() } else { Sense::hover() }))
+        .on_hover_text(tr(ui, like_label(track))).clicked() && enabled
+}
+
 fn track_row(ui: &mut Ui, track: &Track, number: &str, cover: Option<&TextureHandle>, can_edit: bool, can_play: bool, ranked: bool) -> Option<Action> {
     let width = ui.available_width();
     let (rect, r) = ui.allocate_exact_size(vec2(width, ROW_HEIGHT), Sense::hover());
@@ -660,15 +723,13 @@ fn track_row(ui: &mut Ui, track: &Track, number: &str, cover: Option<&TextureHan
     let primary = if thumbnail { 86.0 } else { 40.0 };
     painter.text(rect.left_center() + vec2(21.0, 0.0), Align2::CENTER_CENTER, number, FontId::monospace(13.0), MUTED);
     if thumbnail { artwork(ui, Rect::from_min_size(rect.left_top() + vec2(40.0, 5.0), vec2(38.0, 38.0)), cover, false); }
-    let actions_w = if compact { 132.0 } else { 190.0 };
+    let actions_w = if compact { 172.0 } else { 190.0 };
     let right = rect.right() - actions_w;
     let meta_x = if compact { right } else { rect.left() + (right - rect.left()) * 0.66 };
     let title_x = rect.left() + primary;
     line(ui, pos2(title_x, rect.top() + 4.0), meta_x - title_x - 14.0, &track.title, 17.0, if track.available { TEXT } else { MUTED });
-    let artist = present(&track.artist, "Unknown artist");
-    let caption = if ranked { format!("{artist}  ·  {} plays", track.play_count) }
-        else if compact && !track.album.is_empty() { format!("{artist}  ·  {}", track.album) } else { String::new() };
-    line(ui, pos2(title_x, rect.top() + 26.0), meta_x - title_x - 14.0, present(&caption, artist), 13.0, MUTED);
+    let caption = track_caption(ui, track, compact && !ranked);
+    line(ui, pos2(title_x, rect.top() + 26.0), meta_x - title_x - 14.0, &caption, 13.0, MUTED);
     if !compact {
         let metadata_w = right - meta_x - 70.0;
         line(ui, pos2(meta_x, rect.top() + 6.0), metadata_w, present(&track.album, "Unknown album"), 14.0, TEXT);
@@ -680,7 +741,8 @@ fn track_row(ui: &mut Ui, track: &Track, number: &str, cover: Option<&TextureHan
     let queue_enabled = can_edit && track.available;
     let play_rect = Rect::from_min_size(pos2(right, rect.top() + 3.0), vec2(46.0, 42.0));
     let play = chrome::control_at(ui, play_rect, "▶", "Play now · keep existing queue", play_enabled);
-    let menu_rect = Rect::from_min_size(pos2(right + 52.0, rect.top() + 3.0), vec2(if compact { 73.0 } else { 85.0 }, 42.0));
+    let menu_width = if compact { 70.0 } else { 85.0 };
+    let menu_rect = Rect::from_min_size(pos2(right + 52.0, rect.top() + 3.0), vec2(menu_width, 42.0));
     let mut action = None;
     let menu = ui.put(menu_rect, egui::Button::new(RichText::new(tr(ui, "Queue")).size(14.0)).fill(theme::raised(ui)).corner_radius(7));
     let mark = menu_rect.right_center() - vec2(11.0, 0.0);
@@ -696,13 +758,10 @@ fn track_row(ui: &mut Ui, track: &Track, number: &str, cover: Option<&TextureHan
             action = Some(Action::CatalogQueue(QueuePlacement::End, QueueTarget::Track(track.id.clone())));
             ui.close();
         }
-        if tool(ui, if track.liked { "Remove like" } else { "Like track" }, can_edit).clicked() {
-            action = Some(Action::Like(track.id.clone(), !track.liked));
-            ui.close();
-        }
     });
-    if !compact && track.liked {
-        painter.text(pos2(rect.right() - 21.0, rect.center().y), Align2::CENTER_CENTER, "♥", FontId::proportional(17.0), theme::accent(ui));
+    let like = Rect::from_min_size(pos2(menu_rect.right() + 5.0, rect.top() + 3.0), vec2(42.0, 42.0));
+    if like_at(ui, like, track, can_edit) {
+        action = Some(Action::Like(track.id.clone(), !track.liked));
     }
     if play { Some(Action::CatalogQueue(QueuePlacement::Play, QueueTarget::Track(track.id.clone()))) }
     else { action }

@@ -306,6 +306,16 @@ impl View {
                         if self.page == Page::Playing && self.player.is_some() { self.entrance.begin(); }
                     }
                     if self.cover.as_ref().is_some_and(|(id, _)| player.track.as_ref().is_none_or(|t| t.artwork_id != *id)) { self.cover = None; }
+                    if let Some(current) = &player.track
+                        && self.player.as_ref().and_then(|previous| previous.track.as_ref())
+                            .is_none_or(|previous| previous.id != current.id || previous.play_count != current.play_count) {
+                        self.library.update_play_count(current);
+                        if let Some(queue) = &mut self.queue {
+                            for entry in queue.entries.iter_mut().filter(|entry| entry.track.id == current.id) {
+                                entry.track.play_count = current.play_count;
+                            }
+                        }
+                    }
                     self.player = Some(player);
                 }
                 Event::Queue(queue) => self.queue = Some(queue),
@@ -318,6 +328,9 @@ impl View {
                 Event::CatalogMutationFailed(error) => self.library.changed(Err(error)),
                 Event::TrackLiked(id, liked) => {
                     self.library.liked(&id, liked);
+                    if let Some(track) = self.player.as_mut().and_then(|player| player.track.as_mut()).filter(|track| track.id == id) {
+                        track.liked = liked;
+                    }
                     if let Some(queue) = &mut self.queue {
                         for entry in queue.entries.iter_mut().filter(|entry| entry.track.id == id) { entry.track.liked = liked; }
                     }
@@ -546,7 +559,7 @@ impl View {
         self.local.as_ref().is_some_and(|(id, _)| self.player.as_ref().is_some_and(|p| p.renderer_id == *id))
     }
 
-    fn playing(&self, ui: &mut Ui, track_dialog: &mut Option<TrackDialog>) {
+    fn playing(&mut self, ui: &mut Ui, track_dialog: &mut Option<TrackDialog>) {
         let Some(state) = &self.player else { ui.label(tr(ui, "Waiting for player state…")); return; };
         let label = match state.state.as_str() {
             "playing" if !self.using_usb() => "PLAYING ELSEWHERE",
@@ -559,16 +572,30 @@ impl View {
             self.format.as_ref().zip(self.usb_device()).map(|(format, device)| format.path(device))
         } else { None };
         let track = state.track.as_ref().filter(|track| !track.id.is_empty());
-        if chrome::now_playing(ui, &song, label, output, &state.pending_command, path, track.is_some())
-            && let Some(track) = track {
+        let can_like = !self.read_only && !self.library.mutation_pending();
+        let mut like = None;
+        let show_details = chrome::now_playing(ui, &song, label, output, &state.pending_command, path, track.is_some(), |ui| {
+            if let Some(track) = track {
+                ui.add_space(5.0);
+                ui.horizontal(|ui| {
+                    let heart = crate::ja_library::like_button(track).min_size(vec2(46.0, 42.0));
+                    if ui.add_enabled(can_like, heart).on_hover_text(tr(ui, crate::ja_library::like_label(track))).clicked() {
+                        like = Some(Action::Like(track.id.clone(), !track.liked));
+                    }
+                    ui.label(RichText::new(crate::ja_library::play_count_text(ui, track.play_count)).size(15.0).color(MUTED));
+                });
+            }
+        });
+        if show_details && let Some(track) = track {
             let info = TrackDetails { codec: track.format.clone(), disc: (track.disc > 0).then_some(track.disc),
-                number: (track.track > 0).then_some(track.track), ..TrackDetails::default() };
+                number: (track.track > 0).then_some(track.track), play_count: Some(track.play_count), ..TrackDetails::default() };
             let duration = if track.duration_ms > 0 { track.duration_ms } else { state.duration_ms };
             let mut modal = TrackDialog::new("jastreamer", &track.title, &track.artist, &track.album, duration as f64 / 1000.0, info)
                 .pending(track.id.clone());
             if self.worker.tx.try_send(Action::TrackDetails(track.id.clone())).is_err() { modal.invalidate_jastreamer(); }
             *track_dialog = Some(modal);
         }
+        if let Some(action) = like && self.send(action) { self.library.set_queue_pending(); }
     }
 
     fn output_name(&self, id: &str) -> &str {

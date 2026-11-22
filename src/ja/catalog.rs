@@ -26,6 +26,7 @@ pub enum Collection {
     Tracks,
     MostPlayed,
     Liked,
+    Playlists,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -34,6 +35,7 @@ pub enum Scope {
     Artist { name: String },
     Genre { name: String },
     Folder { root_id: String, path: String },
+    Playlist { id: String },
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -58,7 +60,7 @@ impl Browse {
                 Collection::Artists => "artists",
                 Collection::Genres => "genres",
                 Collection::Folders => "folders",
-                Collection::Tracks | Collection::MostPlayed | Collection::Liked => unreachable!(),
+                Collection::Tracks | Collection::MostPlayed | Collection::Liked | Collection::Playlists => unreachable!(),
             }
         };
         let mut url = base.join("/api/v1/library/")?;
@@ -77,6 +79,7 @@ impl Browse {
                 if recursive { params.append_pair("recursive", "true"); }
                 "path"
             }
+            Some(Scope::Playlist { .. }) => unreachable!("playlists use their own API"),
             None => match self.collection {
                 Collection::Albums => "album",
                 Collection::Artists => "artist",
@@ -84,12 +87,31 @@ impl Browse {
                 Collection::Folders => "path",
                 Collection::Tracks | Collection::Liked => "title",
                 Collection::MostPlayed => "most_played",
+                Collection::Playlists => unreachable!(),
             },
         };
         params.append_pair("sort", sort);
         drop(params);
         Ok(url)
     }
+}
+
+#[derive(Deserialize)]
+pub struct Playlist {
+    pub id: String,
+    pub name: String,
+    pub track_ids: Vec<String>,
+}
+
+fn matches_search(text: &str, needle: &str) -> bool {
+    needle.is_empty() || text.to_lowercase().contains(needle)
+}
+
+fn playlist_url(base: &Url, id: &str) -> Result<Url> {
+    ensure!(!matches!(id, "" | "." | ".."), "invalid playlist ID");
+    let mut url = base.join("/api/v1/playlists")?;
+    url.path_segments_mut().expect("validated HTTP base").push(id);
+    Ok(url)
 }
 
 pub struct Catalog { pub items: Rows, pub total: usize, pub folders: Vec<Folder> }
@@ -99,6 +121,7 @@ pub enum Rows {
     Names(Vec<Name>),
     Folders(Vec<Folder>),
     Tracks(Vec<Track>),
+    Playlists(Vec<Playlist>),
 }
 
 pub enum QueueTarget { Track(String), Scope(Browse) }
@@ -150,7 +173,34 @@ impl ReadSession {
         self.json::<track_details::Info>(track_details::url(&self.base, id)?)?.into_details(id)
     }
 
+    fn playlist_tracks(&self, id: &str, query: &str) -> Result<Vec<Track>> {
+        #[derive(Deserialize)]
+        struct Detail { tracks: Vec<Track> }
+        let Detail { mut tracks } = self.json(playlist_url(&self.base, id)?)?;
+        let needle = query.trim().to_lowercase();
+        if !needle.is_empty() {
+            tracks.retain(|track| [&track.title, &track.artist, &track.album].iter().any(|text| matches_search(text, &needle)));
+        }
+        Ok(tracks)
+    }
+
     fn browse(&self, request: &Browse, current: impl Fn() -> bool) -> Result<Catalog> {
+        if let Some(Scope::Playlist { id }) = &request.scope {
+            let tracks = self.playlist_tracks(id, &request.query)?;
+            let total = tracks.len();
+            let rows = tracks.into_iter().skip(request.offset).take(request.limit()).collect();
+            return Ok(Catalog { items: Rows::Tracks(rows), total, folders: Vec::new() });
+        }
+        if request.collection == Collection::Playlists {
+            #[derive(Deserialize)]
+            struct Listing { items: Vec<Playlist> }
+            let Listing { mut items } = self.json(self.base.join("/api/v1/playlists")?)?;
+            let needle = request.query.trim().to_lowercase();
+            if !needle.is_empty() { items.retain(|playlist| matches_search(&playlist.name, &needle)); }
+            let total = items.len();
+            let rows = items.into_iter().skip(request.offset).take(request.limit()).collect();
+            return Ok(Catalog { items: Rows::Playlists(rows), total, folders: Vec::new() });
+        }
         let url = request.url(&self.base, request.offset, request.limit(), false)?;
         let mut result = if request.tracks() {
             self.json::<Page<Track>>(url)?.into_catalog(Rows::Tracks)
@@ -159,7 +209,7 @@ impl ReadSession {
                 Collection::Albums => self.json::<Page<Album>>(url)?.into_catalog(Rows::Albums),
                 Collection::Artists | Collection::Genres => self.json::<Page<Name>>(url)?.into_catalog(Rows::Names),
                 Collection::Folders => self.json::<Page<Folder>>(url)?.into_catalog(Rows::Folders),
-                Collection::Tracks | Collection::MostPlayed | Collection::Liked => unreachable!(),
+                Collection::Tracks | Collection::MostPlayed | Collection::Liked | Collection::Playlists => unreachable!(),
             }
         };
         if let Some(Scope::Folder { root_id, path }) = &request.scope {
@@ -183,6 +233,8 @@ impl ReadSession {
     fn prepare(&self, target: QueueTarget, purpose: QueuePurpose, current: impl Fn() -> bool) -> Result<PreparedQueue> {
         let track_ids = match target {
             QueueTarget::Track(id) => vec![id],
+            QueueTarget::Scope(Browse { scope: Some(Scope::Playlist { id }), query, .. }) =>
+                self.playlist_tracks(&id, &query)?.into_iter().filter(|track| track.available).map(|track| track.id).collect(),
             QueueTarget::Scope(request) => {
                 ensure!(request.tracks(), "choose a track collection or open a catalog group first");
                 let mut ids = Vec::new();
@@ -291,6 +343,11 @@ impl Api {
     pub(super) fn clear_queue(&mut self, revision: u64, emit: &impl Fn(Event)) -> Result<Event> {
         ensure!(self.cookie.is_some(), "sign in to change the queue");
         self.mutate_queue(json!({"action":"clear","revision":revision}), "Queue cleared", emit)
+    }
+
+    pub(super) fn shuffle_liked(&mut self, revision: u64, emit: &impl Fn(Event)) -> Result<Event> {
+        ensure!(self.cookie.is_some(), "sign in to change the queue");
+        self.mutate_queue(json!({"action":"append_liked_shuffled","revision":revision}), "Shuffled liked tracks added to queue", emit)
     }
 
     fn mutate_queue(&mut self, body: serde_json::Value, notice: &'static str, emit: &impl Fn(Event)) -> Result<Event> {
